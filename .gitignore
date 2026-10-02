@@ -4,3 +4,4 @@ app/data/
 *.db-shm
 __pycache__/
 garden tracker needs.txt
+CLAUDE.local.md
