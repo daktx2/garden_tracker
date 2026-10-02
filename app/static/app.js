@@ -625,37 +625,39 @@ const planner = (() => {
     }
     ctx.globalAlpha = 1;
 
-    // Plant labels (identity is never color alone). Each horizontal run of the same
-    // crop gets one label centered across the run, so names can use the run's full
-    // width; names wrap onto extra lines when the square is tall enough.
+    // Plant labels (identity is never color alone): one label per connected group of
+    // the same crop, centered in the largest rectangle inside that group, wrapping
+    // onto extra lines - or turned sideways for tall, narrow beds - when needed.
     const fs = labelFont(), lineH = Math.round(fs * 1.2);
-    const maxLines = Math.floor((cs - 2) / lineH);
-    if (maxLines >= 1) {
+    if (cs * 2 >= lineH) {
       ctx.font = `${fs}px system-ui, sans-serif`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      const cache = new Map();
-      const cropAt = (x, y) => {
-        if (preview && x >= preview.x0 && x <= preview.x1 && y >= preview.y0 && y <= preview.y1) return drag.tool;
-        return cells.get(KEY(x, y)) || 0;
-      };
-      for (let y = 0; y < plan.height; y++) {
-        for (let x = 0; x < plan.width;) {
-          const c = cropAt(x, y);
-          let end = x;
-          while (end + 1 < plan.width && cropAt(end + 1, y) === c) end++;
-          const crop = c && state.cropById.get(c);
-          if (crop) {
-            const runW = (end - x + 1) * cs - 6;
-            const ck = `${c}|${runW}`;
-            if (!cache.has(ck)) cache.set(ck, layoutLabel(crop.name, runW, maxLines));
-            const lines = cache.get(ck);
-            const cx = RULER_L + ((x + end + 1) / 2) * cs;
-            const top = RULER_T + y * cs + cs / 2 - ((lines.length - 1) * lineH) / 2 + 0.5;
-            ctx.fillStyle = textOn(crop.color);
-            lines.forEach((ln, i) => ctx.fillText(ln, cx, top + i * lineH));
+      const gw = plan.width, gh = plan.height;
+      const grid = new Int32Array(gw * gh);
+      for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
+        grid[y * gw + x] = preview && x >= preview.x0 && x <= preview.x1 && y >= preview.y0 && y <= preview.y1
+          ? drag.tool : (cells.get(KEY(x, y)) || 0);
+      }
+      const seen = new Uint8Array(gw * gh);
+      for (let i = 0; i < grid.length; i++) {
+        const c = grid[i];
+        if (!c || seen[i]) continue;
+        // flood-fill the connected group
+        const group = [i];
+        seen[i] = 1;
+        let x0 = gw, y0 = gh, x1 = 0, y1 = 0;
+        for (let g = 0; g < group.length; g++) {
+          const j = group[g], x = j % gw, y = (j - x) / gw;
+          x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+          for (const [nx, ny] of [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]]) {
+            const n = ny * gw + nx;
+            if (nx >= 0 && ny >= 0 && nx < gw && ny < gh && !seen[n] && grid[n] === c) { seen[n] = 1; group.push(n); }
           }
-          x = end + 1;
         }
+        const crop = state.cropById.get(c);
+        if (!crop) continue;
+        const r = largestRect(grid, gw, c, x0, y0, x1, y1, group);
+        drawLabel(crop, RULER_L + r.x * cs, RULER_T + r.y * cs, r.w * cs, r.h * cs, lineH);
       }
     }
 
@@ -683,6 +685,58 @@ const planner = (() => {
     placePanel();
   }
 
+  // Largest all-same-crop rectangle within one connected group (histogram method over
+  // the group's bounding box). Only squares belonging to this group count.
+  function largestRect(grid, W, c, x0, y0, x1, y1, group) {
+    const inGroup = new Set(group);
+    const bw = x1 - x0 + 1;
+    const heights = new Int32Array(bw);
+    let best = { x: x0, y: y0, w: 1, h: 1, area: 0 };
+    for (let y = y0; y <= y1; y++) {
+      for (let i = 0; i < bw; i++) {
+        const idx = y * W + x0 + i;
+        heights[i] = grid[idx] === c && inGroup.has(idx) ? heights[i] + 1 : 0;
+      }
+      const stack = [];
+      for (let i = 0; i <= bw; i++) {
+        const h = i < bw ? heights[i] : 0;
+        while (stack.length && heights[stack[stack.length - 1]] >= h) {
+          const top = stack.pop();
+          const hh = heights[top];
+          const left = stack.length ? stack[stack.length - 1] + 1 : 0;
+          const w = i - left;
+          // prefer bigger area; on ties prefer wider (horizontal text reads best)
+          if (hh && (hh * w > best.area || (hh * w === best.area && w > best.w))) {
+            best = { x: x0 + left, y: y - hh + 1, w, h: hh, area: hh * w };
+          }
+        }
+        stack.push(i);
+      }
+    }
+    return best;
+  }
+
+  // Draw a crop name centered in a box: horizontal (wrapped) if it fits, otherwise
+  // sideways when the box is taller than wide, otherwise truncated with …
+  function drawLabel(crop, bx, by, bw, bh, lineH) {
+    const pad = 6;
+    const horiz = layoutLabel(crop.name, bw - pad, Math.floor((bh - 2) / lineH));
+    const full = ls => ls.length > 0 && !ls.some(l => l.endsWith('…'));
+    let lines = horiz, rotate = false;
+    if (!full(horiz) && bh > bw) {
+      const vert = layoutLabel(crop.name, bh - pad, Math.floor((bw - 2) / lineH));
+      if (full(vert) || (vert.length && !horiz.length)) { lines = vert; rotate = true; }
+    }
+    if (!lines.length) return;
+    ctx.save();
+    ctx.translate(bx + bw / 2, by + bh / 2);
+    if (rotate) ctx.rotate(-Math.PI / 2);
+    ctx.fillStyle = textOn(crop.color);
+    const top = -((lines.length - 1) * lineH) / 2 + 0.5;
+    lines.forEach((ln, i) => ctx.fillText(ln, 0, top + i * lineH));
+    ctx.restore();
+  }
+
   const fits = (s, w) => ctx.measureText(s).width <= w;
 
   function truncate(s, width) {
@@ -696,6 +750,7 @@ const planner = (() => {
 
   // Wrap a name into at most maxLines lines of the given width; truncate with … if it won't fit.
   function layoutLabel(name, width, maxLines) {
+    if (maxLines < 1 || width <= 0) return [];
     if (fits(name, width)) return [name];
     if (maxLines === 1) return [truncate(name, width)].filter(Boolean);
     const lines = [];
