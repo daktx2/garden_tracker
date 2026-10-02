@@ -190,6 +190,7 @@ const planner = (() => {
   let plan = null;              // current plan metadata
   let cells = new Map();        // KEY -> crop id
   let notes = new Map();        // KEY -> {variety, rating, note} (only for planted squares)
+  let groups = new Map();       // KEY -> label block id; absent/0 = merge with touching same-crop squares
   let selected = null;          // {x, y} square open in the notes panel
   let noteEditOpen = false;     // an undo snapshot was already taken for the current note edit
   let tool = 0;                 // crop id, 0 = eraser
@@ -238,8 +239,10 @@ const planner = (() => {
     plan = p;
     cells = new Map(p.cells.map(([x, y, c]) => [KEY(x, y), c]));
     notes = new Map();
-    for (const [x, y, , variety, rating, note] of p.cells) {
+    groups = new Map();
+    for (const [x, y, , variety, rating, note, grp] of p.cells) {
       if (variety || rating || note) notes.set(KEY(x, y), { variety, rating, note });
+      if (grp) groups.set(KEY(x, y), grp);
     }
     undoStack = []; redoStack = [];
     selected = null;
@@ -344,7 +347,7 @@ const planner = (() => {
     const b = e.target.closest('[data-tool]');
     if (!b) return;
     tool = +b.dataset.tool;
-    if (mode === 'select') mode = 'brush'; // picking a plant means you want to paint
+    if (mode !== 'brush' && mode !== 'rect') mode = 'brush'; // picking a plant means you want to paint
     renderPalette();
   });
   function setMode(m) {
@@ -356,7 +359,8 @@ const planner = (() => {
 
   // ---------- per-square notes ----------
   const RATINGS = { 1: '👍 Liked', 2: '😐 Okay', '-1': "👎 Didn't like" };
-  const snapshot = () => ({ cells: new Map(cells), notes: new Map(notes) });
+  const snapshot = () => ({ cells: new Map(cells), notes: new Map(notes), groups: new Map(groups) });
+  const groupOf = k => groups.get(k) || 0;
 
   function selectSquare(x, y) {
     selected = { x, y };
@@ -367,15 +371,16 @@ const planner = (() => {
 
   function noteAt(k) { return notes.get(k) || { variety: '', rating: 0, note: '' }; }
 
-  // Squares of the same crop connected to (x, y) - a plant often spans several squares.
+  // Squares in the same labeled block as (x, y): touching, same crop, same block id.
   function connectedSquares(x, y) {
-    const crop = cells.get(KEY(x, y));
+    const crop = cells.get(KEY(x, y)), grp = groupOf(KEY(x, y));
     const seen = new Set([KEY(x, y)]), stack = [[x, y]];
     while (stack.length) {
       const [cx, cy] = stack.pop();
       for (const [nx, ny] of [[cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]]) {
         const k = KEY(nx, ny);
-        if (nx < 0 || ny < 0 || nx >= plan.width || ny >= plan.height || seen.has(k) || cells.get(k) !== crop) continue;
+        if (nx < 0 || ny < 0 || nx >= plan.width || ny >= plan.height || seen.has(k) ||
+            cells.get(k) !== crop || groupOf(k) !== grp) continue;
         seen.add(k); stack.push([nx, ny]);
       }
     }
@@ -595,6 +600,7 @@ const planner = (() => {
 
     // cells
     const preview = drag && drag.mode === 'rect' ? rectOf(drag.start, drag.end) : null;
+    const inPreview = (x, y) => preview && x >= preview.x0 && x <= preview.x1 && y >= preview.y0 && y <= preview.y1;
     for (let y = 0; y < plan.height; y++) {
       for (let x = 0; x < plan.width; x++) {
         let c = cells.get(KEY(x, y)) || 0;
@@ -629,14 +635,16 @@ const planner = (() => {
     // the same crop, centered in the largest rectangle inside that group, wrapping
     // onto extra lines - or turned sideways for tall, narrow beds - when needed.
     const fs = labelFont(), lineH = Math.round(fs * 1.2);
-    if (cs * 2 >= lineH) {
+    {
       ctx.font = `${fs}px system-ui, sans-serif`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       const gw = plan.width, gh = plan.height;
-      const grid = new Int32Array(gw * gh);
+      const grid = new Int32Array(gw * gh), grp = new Int32Array(gw * gh);
       for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
-        grid[y * gw + x] = preview && x >= preview.x0 && x <= preview.x1 && y >= preview.y0 && y <= preview.y1
-          ? drag.tool : (cells.get(KEY(x, y)) || 0);
+        const k = KEY(x, y), cur = cells.get(k) || 0;
+        const c = inPreview(x, y) ? drag.tool : cur;
+        grid[y * gw + x] = c;
+        grp[y * gw + x] = c === cur ? groupOf(k) : 0;
       }
       const seen = new Uint8Array(gw * gh);
       for (let i = 0; i < grid.length; i++) {
@@ -651,14 +659,47 @@ const planner = (() => {
           x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
           for (const [nx, ny] of [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]]) {
             const n = ny * gw + nx;
-            if (nx >= 0 && ny >= 0 && nx < gw && ny < gh && !seen[n] && grid[n] === c) { seen[n] = 1; group.push(n); }
+            if (nx >= 0 && ny >= 0 && nx < gw && ny < gh && !seen[n] && grid[n] === c && grp[n] === grp[i]) {
+              seen[n] = 1; group.push(n);
+            }
           }
         }
         const crop = state.cropById.get(c);
-        if (!crop) continue;
+        if (!crop || cs * 2 < lineH) continue;
         const r = largestRect(grid, gw, c, x0, y0, x1, y1, group);
         drawLabel(crop, RULER_L + r.x * cs, RULER_T + r.y * cs, r.w * cs, r.h * cs, lineH);
       }
+
+      // Divider lines where touching squares of the same crop are in different blocks.
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = cssVar('--surface');
+      ctx.beginPath();
+      for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
+        const i = y * gw + x;
+        if (!grid[i]) continue;
+        if (x + 1 < gw && grid[i + 1] === grid[i] && grp[i + 1] !== grp[i]) {
+          const px = RULER_L + (x + 1) * cs + 0.5;
+          ctx.moveTo(px, RULER_T + y * cs + 2); ctx.lineTo(px, RULER_T + (y + 1) * cs - 2);
+        }
+        if (y + 1 < gh && grid[i + gw] === grid[i] && grp[i + gw] !== grp[i]) {
+          const py = RULER_T + (y + 1) * cs + 0.5;
+          ctx.moveTo(RULER_L + x * cs + 2, py); ctx.lineTo(RULER_L + (x + 1) * cs - 2, py);
+        }
+      }
+      ctx.stroke();
+      ctx.lineCap = 'butt';
+    }
+
+    // outline of the area being unmerged/merged
+    if (drag && (drag.mode === 'split' || drag.mode === 'merge')) {
+      const r = rectOf(drag.start, drag.end);
+      ctx.save();
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.strokeStyle = cssVar('--text');
+      ctx.strokeRect(RULER_L + r.x0 * cs + 1, RULER_T + r.y0 * cs + 1, (r.x1 - r.x0 + 1) * cs - 2, (r.y1 - r.y0 + 1) * cs - 2);
+      ctx.restore();
     }
 
     // corner mark on squares that have notes
@@ -784,8 +825,30 @@ const planner = (() => {
     const k = KEY(x, y);
     if ((cells.get(k) || 0) === t) return false;
     if (t) cells.set(k, t); else cells.delete(k);
-    notes.delete(k); // notes describe the old plant, so they go with it
+    notes.delete(k);  // notes describe the old plant, so they go with it
+    groups.delete(k); // a new plant joins the default (merged) block
     return true;
+  }
+
+  // Unmerge: the planted squares in the rectangle become their own labeled block.
+  // Merge: a single click rejoins the clicked block with its neighbours; a dragged
+  // rectangle rejoins every square inside it.
+  function applyBlockTool(m, r) {
+    let keys = [];
+    for (let y = r.y0; y <= r.y1; y++) for (let x = r.x0; x <= r.x1; x++) {
+      if (cells.has(KEY(x, y))) keys.push(KEY(x, y));
+    }
+    if (m === 'merge' && r.x0 === r.x1 && r.y0 === r.y1 && keys.length) {
+      keys = connectedSquares(r.x0, r.y0);
+    }
+    let changedAny = false;
+    if (m === 'split') {
+      const id = Math.max(0, ...groups.values()) + 1;
+      for (const k of keys) { groups.set(k, id); changedAny = true; }
+    } else {
+      for (const k of keys) if (groups.delete(k)) changedAny = true;
+    }
+    return changedAny;
   }
 
   function paintLine(a, b, t) {
@@ -843,6 +906,8 @@ const planner = (() => {
       for (let y = r.y0; y <= r.y1; y++) for (let x = r.x0; x <= r.x1; x++) {
         drag.changed = paint(x, y, drag.tool) || drag.changed;
       }
+    } else if (drag.mode === 'split' || drag.mode === 'merge') {
+      drag.changed = applyBlockTool(drag.mode, rectOf(drag.start, drag.end));
     }
     if (drag.changed) {
       undoStack.push(drag.before);
@@ -864,7 +929,7 @@ const planner = (() => {
   }
 
   function restore(snap) {
-    cells = snap.cells; notes = snap.notes;
+    cells = snap.cells; notes = snap.notes; groups = snap.groups;
     noteEditOpen = false;
     changed(); draw();
   }
@@ -892,6 +957,8 @@ const planner = (() => {
     else if (k === 'b') setMode('brush');
     else if (k === 'r') setMode('rect');
     else if (k === 's') setMode('select');
+    else if (k === 'u') setMode('split');
+    else if (k === 'm') setMode('merge');
     else if (k === 'escape' && selected) closePanel();
   });
 
@@ -927,7 +994,7 @@ const planner = (() => {
     }
     undoStack.push(snapshot()); redoStack = [];
     for (const k of [...cells.keys()]) {
-      if (k % 1024 >= w || Math.floor(k / 1024) >= h) { cells.delete(k); notes.delete(k); }
+      if (k % 1024 >= w || Math.floor(k / 1024) >= h) { cells.delete(k); notes.delete(k); groups.delete(k); }
     }
     if (selected && (selected.x >= w || selected.y >= h)) selected = null;
     plan.width = w; plan.height = h;
@@ -962,7 +1029,8 @@ const planner = (() => {
       cells: [...cells].map(([k, c]) => {
         const n = notes.get(k);
         const cell = [k % 1024, Math.floor(k / 1024), c];
-        return n ? cell.concat([n.variety.trim(), n.rating, n.note]) : cell;
+        const g = groupOf(k);
+        return n || g ? cell.concat([n ? n.variety.trim() : '', n ? n.rating : 0, n ? n.note : '', g]) : cell;
       }),
     };
   }

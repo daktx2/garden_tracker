@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS plan_cells (
     variety TEXT NOT NULL DEFAULT '',
     rating INTEGER NOT NULL DEFAULT 0,   -- 1 liked, 0 no rating, -1 disliked, 2 okay
     note TEXT NOT NULL DEFAULT '',
+    grp INTEGER NOT NULL DEFAULT 0,      -- label block; 0 = merge with touching squares of same crop
     PRIMARY KEY (plan_id, x, y)
 ) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS harvests (
@@ -89,7 +90,8 @@ def init_db():
         cols = {r[1] for r in conn.execute("PRAGMA table_info(plan_cells)")}
         for col, ddl in (("variety", "TEXT NOT NULL DEFAULT ''"),
                          ("rating", "INTEGER NOT NULL DEFAULT 0"),
-                         ("note", "TEXT NOT NULL DEFAULT ''")):
+                         ("note", "TEXT NOT NULL DEFAULT ''"),
+                         ("grp", "INTEGER NOT NULL DEFAULT 0")):
             if col not in cols:
                 conn.execute(f"ALTER TABLE plan_cells ADD COLUMN {col} {ddl}")
 
@@ -227,7 +229,7 @@ def list_plans(conn, q, body):
 def plan_with_cells(conn, plan_id):
     plan = get_or_404(conn, "plans", plan_id)
     plan["cells"] = [list(r) for r in conn.execute(
-        "SELECT x, y, crop_id, variety, rating, note FROM plan_cells WHERE plan_id = ?",
+        "SELECT x, y, crop_id, variety, rating, note, grp FROM plan_cells WHERE plan_id = ?",
         (plan_id,))]
     return plan
 
@@ -255,8 +257,8 @@ def create_plan(conn, q, body):
         src = get_or_404(conn, "plans", copy_from)
         # Varieties carry over to the new plan; ratings and notes belong to the old season.
         conn.execute("""
-            INSERT INTO plan_cells (plan_id, x, y, crop_id, variety)
-            SELECT ?, x, y, crop_id, variety FROM plan_cells
+            INSERT INTO plan_cells (plan_id, x, y, crop_id, variety, grp)
+            SELECT ?, x, y, crop_id, variety, grp FROM plan_cells
             WHERE plan_id = ? AND x < ? AND y < ?""", (plan_id, src["id"], width, height))
         conn.execute("UPDATE plans SET notes = ? WHERE id = ?", (src["notes"], plan_id))
     return plan_with_cells(conn, plan_id)
@@ -283,16 +285,19 @@ def update_plan(conn, q, body, plan_id):
                 variety = str(c[3] if len(c) > 3 and c[3] else "").strip()[:80]
                 rating = int(c[4]) if len(c) > 4 and c[4] else 0
                 note = str(c[5] if len(c) > 5 and c[5] else "")[:2000]
+                grp = int(c[6]) if len(c) > 6 and c[6] else 0
             except (TypeError, ValueError, IndexError):
-                raise ApiError(400, "each cell must be [x, y, crop_id, variety, rating, note]")
+                raise ApiError(400, "each cell must be [x, y, crop_id, variety, rating, note, group]")
             if rating not in (-1, 0, 1, 2):
                 rating = 0
+            if not 0 <= grp < 2**31:
+                grp = 0
             if 0 <= x < width and 0 <= y < height and crop_id in valid_crops:
-                clean.append((plan_id, x, y, crop_id, variety, rating, note))
+                clean.append((plan_id, x, y, crop_id, variety, rating, note, grp))
         conn.execute("DELETE FROM plan_cells WHERE plan_id = ?", (plan_id,))
         conn.executemany("INSERT OR REPLACE INTO plan_cells "
-                         "(plan_id, x, y, crop_id, variety, rating, note) "
-                         "VALUES (?, ?, ?, ?, ?, ?, ?)", clean)
+                         "(plan_id, x, y, crop_id, variety, rating, note, grp) "
+                         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)", clean)
     else:
         conn.execute("DELETE FROM plan_cells WHERE plan_id = ? AND (x >= ? OR y >= ?)",
                      (plan_id, width, height))
