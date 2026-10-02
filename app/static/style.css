@@ -180,6 +180,22 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
 .canvas-wrap canvas { display: block; touch-action: none; cursor: crosshair; }
 .grid-footer { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; color: var(--text-2); }
 .legend-summary { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.square-panel {
+  margin-top: 14px; padding: 14px; border: 1px solid var(--accent);
+  border-radius: var(--radius); background: var(--accent-soft);
+}
+.square-panel .card-head { margin-bottom: 8px; }
+.square-panel input[type=text], .square-panel textarea { background: var(--surface); }
+.rating { display: flex; gap: 4px; flex-wrap: wrap; }
+.rating button {
+  border: 1px solid var(--border); background: var(--surface); border-radius: 999px;
+  padding: 6px 12px; cursor: pointer; font-size: 13px;
+}
+.rating button:hover { background: var(--surface-2); }
+.rating button.on { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.plant-notes { margin-top: 16px; }
+.plant-notes table.data tr { cursor: pointer; }
+.plant-notes td.note-text { white-space: pre-wrap; max-width: 420px; }
 
 /* ---------- harvest ---------- */
 .entry-form { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }

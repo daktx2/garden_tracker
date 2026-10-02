@@ -189,6 +189,9 @@ const planner = (() => {
   const ctx = canvas.getContext('2d');
   let plan = null;              // current plan metadata
   let cells = new Map();        // KEY -> crop id
+  let notes = new Map();        // KEY -> {variety, rating, note} (only for planted squares)
+  let selected = null;          // {x, y} square open in the notes panel
+  let noteEditOpen = false;     // an undo snapshot was already taken for the current note edit
   let tool = 0;                 // crop id, 0 = eraser
   let mode = 'brush';
   let zoom = 34;
@@ -223,7 +226,12 @@ const planner = (() => {
     const p = await api('GET', `/api/plans/${id}`);
     plan = p;
     cells = new Map(p.cells.map(([x, y, c]) => [KEY(x, y), c]));
+    notes = new Map();
+    for (const [x, y, , variety, rating, note] of p.cells) {
+      if (variety || rating || note) notes.set(KEY(x, y), { variety, rating, note });
+    }
     undoStack = []; redoStack = [];
+    selected = null;
     $('#plan-name').value = p.name;
     $('#plan-year').value = p.year;
     $('#plan-width').value = p.width;
@@ -233,7 +241,7 @@ const planner = (() => {
     if (tool && !state.cropById.has(tool)) tool = 0;
     if (!tool && state.crops.length) tool = state.crops[0].id;
     if (location.hash !== `#planner/${id}`) history.replaceState(null, '', `#planner/${id}`);
-    renderTabs(); renderPalette(); draw();
+    renderTabs(); renderPalette(); renderSquarePanel(); draw();
   }
 
   function renderTabs() {
@@ -306,6 +314,7 @@ const planner = (() => {
         <span class="count">${n.get(c.id) ? n.get(c.id) + ' ft²' : ''}</span></button>`).join('');
     $$('.palette .tools .btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
     renderSummary(n);
+    renderPlantNotes();
   }
 
   function renderSummary(n = counts()) {
@@ -324,11 +333,143 @@ const planner = (() => {
     const b = e.target.closest('[data-tool]');
     if (!b) return;
     tool = +b.dataset.tool;
+    if (mode === 'select') mode = 'brush'; // picking a plant means you want to paint
     renderPalette();
   });
-  $$('.palette .tools .btn').forEach(b => b.addEventListener('click', () => {
-    mode = b.dataset.mode; renderPalette();
-  }));
+  function setMode(m) {
+    mode = m;
+    if (m !== 'select' && selected) { selected = null; renderSquarePanel(); draw(); }
+    renderPalette();
+  }
+  $$('.palette .tools .btn').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+
+  // ---------- per-square notes ----------
+  const RATINGS = { 1: '👍 Liked', 2: '😐 Okay', '-1': "👎 Didn't like" };
+  const snapshot = () => ({ cells: new Map(cells), notes: new Map(notes) });
+
+  function selectSquare(x, y) {
+    selected = { x, y };
+    noteEditOpen = false;
+    renderSquarePanel();
+    draw();
+  }
+
+  function noteAt(k) { return notes.get(k) || { variety: '', rating: 0, note: '' }; }
+
+  // Squares of the same crop connected to (x, y) - a plant often spans several squares.
+  function connectedSquares(x, y) {
+    const crop = cells.get(KEY(x, y));
+    const seen = new Set([KEY(x, y)]), stack = [[x, y]];
+    while (stack.length) {
+      const [cx, cy] = stack.pop();
+      for (const [nx, ny] of [[cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]]) {
+        const k = KEY(nx, ny);
+        if (nx < 0 || ny < 0 || nx >= plan.width || ny >= plan.height || seen.has(k) || cells.get(k) !== crop) continue;
+        seen.add(k); stack.push([nx, ny]);
+      }
+    }
+    return [...seen];
+  }
+
+  function renderSquarePanel() {
+    const panel = $('#square-panel');
+    if (!plan || !selected) { panel.hidden = true; return; }
+    const k = KEY(selected.x, selected.y);
+    const crop = state.cropById.get(cells.get(k));
+    panel.hidden = false;
+    $('#sq-title').innerHTML = (crop ? `<span class="swatch" style="background:${crop.color}"></span>${esc(crop.name)}` : 'Empty square') +
+      ` <span class="hint">· column ${selected.x + 1}, row ${selected.y + 1}</span>`;
+    $('#sq-empty').hidden = !!crop;
+    $('#sq-form').hidden = !crop;
+    if (!crop) return;
+    const n = noteAt(k);
+    if (document.activeElement !== $('#sq-variety')) $('#sq-variety').value = n.variety;
+    if (document.activeElement !== $('#sq-note')) $('#sq-note').value = n.note;
+    $$('#sq-rating button').forEach(b => b.classList.toggle('on', +b.dataset.r === n.rating));
+    // suggest varieties already used for this crop in this plan
+    const vs = new Set();
+    for (const [kk, nn] of notes) if (nn.variety && cells.get(kk) === crop.id) vs.add(nn.variety);
+    $('#sq-variety-list').innerHTML = [...vs].map(v => `<option value="${esc(v)}">`).join('');
+    const group = connectedSquares(selected.x, selected.y).length;
+    $('#sq-spread').hidden = group < 2;
+    $('#sq-spread').textContent = `Copy these notes to all ${group} connected ${crop.name} squares`;
+  }
+
+  function editNote(change) {
+    if (!selected) return;
+    const k = KEY(selected.x, selected.y);
+    if (!cells.has(k)) return;
+    if (!noteEditOpen) { // one undo step per editing session on a square
+      undoStack.push(snapshot()); redoStack = [];
+      noteEditOpen = true;
+    }
+    const n = { ...noteAt(k), ...change };
+    if (n.variety || n.rating || n.note) notes.set(k, n); else notes.delete(k);
+    renderPlantNotes();
+    scheduleSave();
+    draw();
+  }
+
+  $('#sq-variety').addEventListener('input', e => editNote({ variety: e.target.value }));
+  $('#sq-note').addEventListener('input', e => editNote({ note: e.target.value }));
+  $('#sq-rating').addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b || !selected) return;
+    const r = +b.dataset.r;
+    editNote({ rating: noteAt(KEY(selected.x, selected.y)).rating === r ? 0 : r });
+    renderSquarePanel();
+  });
+  $('#sq-clear').addEventListener('click', () => {
+    if (!selected) return;
+    noteEditOpen = false;
+    editNote({ variety: '', rating: 0, note: '' });
+    noteEditOpen = false;
+    renderSquarePanel();
+  });
+  $('#sq-spread').addEventListener('click', () => {
+    if (!selected) return;
+    const src = notes.get(KEY(selected.x, selected.y));
+    undoStack.push(snapshot()); redoStack = [];
+    noteEditOpen = false;
+    for (const k of connectedSquares(selected.x, selected.y)) {
+      if (src) notes.set(k, { ...src }); else notes.delete(k);
+    }
+    changed(); draw();
+    toast('Notes copied');
+  });
+  $('#sq-close').addEventListener('click', () => { selected = null; renderSquarePanel(); draw(); });
+
+  // Table of every note in this plan; identical notes on several squares are merged.
+  function renderPlantNotes() {
+    const el = $('#plant-notes');
+    if (!plan || !notes.size) { el.innerHTML = ''; return; }
+    const groups = new Map();
+    for (const [k, n] of notes) {
+      const crop = state.cropById.get(cells.get(k));
+      if (!crop) continue;
+      const gk = JSON.stringify([crop.id, n.variety, n.rating, n.note]);
+      if (!groups.has(gk)) groups.set(gk, { crop, n, keys: [] });
+      groups.get(gk).keys.push(k);
+    }
+    const list = [...groups.values()].sort((a, b) =>
+      a.crop.name.localeCompare(b.crop.name) || a.n.variety.localeCompare(b.n.variety));
+    el.innerHTML = `<h3 style="margin-bottom:6px">Plant notes</h3><div class="table-wrap"><table class="data">
+      <thead><tr><th>Crop</th><th>Variety</th><th>Rating</th><th>Notes</th><th class="num">Squares</th></tr></thead><tbody>` +
+      list.map(g => {
+        const k = Math.min(...g.keys);
+        return `<tr data-k="${k}" title="Click to select"><td><span class="swatch" style="background:${g.crop.color}"></span>${esc(g.crop.name)}</td>
+          <td>${esc(g.n.variety) || '<span class="hint">–</span>'}</td><td>${RATINGS[g.n.rating] || '<span class="hint">–</span>'}</td>
+          <td class="note-text">${esc(g.n.note)}</td><td class="num">${g.keys.length}</td></tr>`;
+      }).join('') + '</tbody></table></div>';
+  }
+  $('#plant-notes').addEventListener('click', e => {
+    const tr = e.target.closest('tr[data-k]');
+    if (!tr) return;
+    const k = +tr.dataset.k;
+    setMode('select');
+    selectSquare(k % 1024, Math.floor(k / 1024));
+    $('#square-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
   $('#palette-add').addEventListener('submit', async e => {
     e.preventDefault();
     const input = $('input', e.target);
@@ -418,6 +559,28 @@ const planner = (() => {
         }
       }
     }
+
+    // corner mark on squares that have notes
+    const mark = Math.max(5, Math.round(cs * 0.28));
+    for (const k of notes.keys()) {
+      const crop = state.cropById.get(cells.get(k));
+      if (!crop) continue;
+      const px = RULER_L + (k % 1024 + 1) * cs, py = RULER_T + Math.floor(k / 1024) * cs;
+      ctx.fillStyle = textOn(crop.color);
+      ctx.beginPath();
+      ctx.moveTo(px - mark, py + 1); ctx.lineTo(px - 1, py + 1); ctx.lineTo(px - 1, py + mark);
+      ctx.closePath(); ctx.fill();
+    }
+
+    // selected square outline
+    if (selected) {
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = cssVar('--text');
+      ctx.strokeRect(RULER_L + selected.x * cs + 1.5, RULER_T + selected.y * cs + 1.5, cs - 3, cs - 3);
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = cssVar('--surface');
+      ctx.strokeRect(RULER_L + selected.x * cs + 3.75, RULER_T + selected.y * cs + 3.75, cs - 7.5, cs - 7.5);
+    }
   }
 
   function fitLabel(name, width) {
@@ -445,6 +608,7 @@ const planner = (() => {
     const k = KEY(x, y);
     if ((cells.get(k) || 0) === t) return false;
     if (t) cells.set(k, t); else cells.delete(k);
+    notes.delete(k); // notes describe the old plant, so they go with it
     return true;
   }
 
@@ -469,8 +633,9 @@ const planner = (() => {
     const c = cellAt(e);
     if (!c) return;
     e.preventDefault();
+    if (mode === 'select' && !e.shiftKey) { selectSquare(c.x, c.y); return; }
     canvas.setPointerCapture(e.pointerId);
-    drag = { mode: e.shiftKey ? 'rect' : mode, tool, start: c, end: c, last: c, before: new Map(cells), changed: false };
+    drag = { mode: e.shiftKey ? 'rect' : mode, tool, start: c, end: c, last: c, before: snapshot(), changed: false };
     if (drag.mode === 'brush') drag.changed = paint(c.x, c.y, tool);
     draw();
   });
@@ -478,8 +643,11 @@ const planner = (() => {
   canvas.addEventListener('pointermove', e => {
     const c = cellAt(e);
     if (c) {
-      const crop = state.cropById.get(cells.get(KEY(c.x, c.y)));
-      $('#plan-hover').textContent = `Column ${c.x + 1}, row ${c.y + 1}: ${crop ? crop.name : 'empty'}`;
+      const k = KEY(c.x, c.y);
+      const crop = state.cropById.get(cells.get(k));
+      const n = notes.get(k);
+      $('#plan-hover').textContent = `Column ${c.x + 1}, row ${c.y + 1}: ${crop ? crop.name : 'empty'}` +
+        (n && n.variety ? ` (${n.variety})` : '') + (n && RATINGS[n.rating] ? ` ${RATINGS[n.rating]}` : '');
     } else {
       $('#plan-hover').innerHTML = '&nbsp;';
     }
@@ -515,20 +683,24 @@ const planner = (() => {
 
   function changed() {
     renderPalette();
+    renderSquarePanel();
     scheduleSave();
   }
 
+  function restore(snap) {
+    cells = snap.cells; notes = snap.notes;
+    noteEditOpen = false;
+    changed(); draw();
+  }
   function undo() {
     if (!undoStack.length) return;
-    redoStack.push(new Map(cells));
-    cells = undoStack.pop();
-    changed(); draw();
+    redoStack.push(snapshot());
+    restore(undoStack.pop());
   }
   function redo() {
     if (!redoStack.length) return;
-    undoStack.push(new Map(cells));
-    cells = redoStack.pop();
-    changed(); draw();
+    undoStack.push(snapshot());
+    restore(redoStack.pop());
   }
   $('#plan-undo').addEventListener('click', undo);
   $('#plan-redo').addEventListener('click', redo);
@@ -539,7 +711,12 @@ const planner = (() => {
     const k = e.key.toLowerCase();
     if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
     else if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); }
-    else if (!e.ctrlKey && !e.metaKey && !e.altKey && k === 'e') { tool = 0; renderPalette(); }
+    else if (e.ctrlKey || e.metaKey || e.altKey) return;
+    else if (k === 'e') { tool = 0; if (mode === 'select') setMode('brush'); else renderPalette(); }
+    else if (k === 'b') setMode('brush');
+    else if (k === 'r') setMode('rect');
+    else if (k === 's') setMode('select');
+    else if (k === 'escape' && selected) { selected = null; renderSquarePanel(); draw(); }
   });
 
   $('#plan-zoom').addEventListener('input', e => {
@@ -566,8 +743,11 @@ const planner = (() => {
       $('#plan-width').value = plan.width; $('#plan-height').value = plan.height;
       return;
     }
-    undoStack.push(new Map(cells)); redoStack = [];
-    for (const k of [...cells.keys()]) if (k % 1024 >= w || Math.floor(k / 1024) >= h) cells.delete(k);
+    undoStack.push(snapshot()); redoStack = [];
+    for (const k of [...cells.keys()]) {
+      if (k % 1024 >= w || Math.floor(k / 1024) >= h) { cells.delete(k); notes.delete(k); }
+    }
+    if (selected && (selected.x >= w || selected.y >= h)) selected = null;
     plan.width = w; plan.height = h;
     changed(); draw();
   });
@@ -597,7 +777,11 @@ const planner = (() => {
     const year = Math.round(+$('#plan-year').value) || plan.year;
     return {
       name, year, width: plan.width, height: plan.height, notes: $('#plan-notes').value,
-      cells: [...cells].map(([k, c]) => [k % 1024, Math.floor(k / 1024), c]),
+      cells: [...cells].map(([k, c]) => {
+        const n = notes.get(k);
+        const cell = [k % 1024, Math.floor(k / 1024), c];
+        return n ? cell.concat([n.variety.trim(), n.rating, n.note]) : cell;
+      }),
     };
   }
 

@@ -30,15 +30,16 @@
         <aside class="card palette">
           <div class="card-head" style="margin-bottom:8px"><h2>Plants</h2></div>
           <div class="tools">
-            <button class="btn small" data-mode="brush" title="Click or drag to paint squares">🖌 Brush</button>
-            <button class="btn small" data-mode="rect" title="Drag to fill a rectangle">▭ Rectangle</button>
+            <button class="btn small" data-mode="brush" title="Click or drag to paint squares (B)">🖌 Brush</button>
+            <button class="btn small" data-mode="rect" title="Drag to fill a rectangle (R)">▭ Rectangle</button>
+            <button class="btn small" data-mode="select" title="Click a square to add notes (S)">👆 Select / notes</button>
           </div>
           <div class="crop-list" id="palette-list"></div>
           <form class="quick-add" id="palette-add">
             <input type="text" placeholder="Add a plant…" maxlength="40" required>
             <button class="btn small" type="submit">Add</button>
           </form>
-          <p class="hint">Ctrl+Z to undo, Ctrl+Y to redo. Press E to switch to the eraser.</p>
+          <p class="hint">Keys: B brush, R rectangle, S select, E eraser. Ctrl+Z to undo, Ctrl+Y to redo. Squares with a corner mark have notes.</p>
         </aside>
         <div class="card">
           <div class="plan-toolbar">
@@ -59,7 +60,40 @@
             <div class="legend-summary" id="plan-summary"></div>
             <div id="plan-hover">&nbsp;</div>
           </div>
-          <label class="field" style="margin-top:14px">Notes
+
+          <div class="square-panel" id="square-panel" hidden>
+            <div class="card-head">
+              <h3 id="sq-title"></h3>
+              <button class="icon-btn" id="sq-close" title="Close">✕</button>
+            </div>
+            <p class="hint" id="sq-empty" hidden>This square is empty. Paint a plant here first, then add notes about it.</p>
+            <div id="sq-form">
+              <div class="row">
+                <label class="field" style="flex:1;min-width:180px">Variety
+                  <input type="text" id="sq-variety" maxlength="80" list="sq-variety-list" placeholder="e.g. Cherokee Purple">
+                  <datalist id="sq-variety-list"></datalist>
+                </label>
+                <div class="field">Did you like it?
+                  <div class="rating" id="sq-rating">
+                    <button type="button" data-r="1">👍 Liked</button>
+                    <button type="button" data-r="2">😐 Okay</button>
+                    <button type="button" data-r="-1">👎 Didn't like</button>
+                  </div>
+                </div>
+              </div>
+              <label class="field" style="margin-top:10px">Notes for this square
+                <textarea id="sq-note" maxlength="2000" placeholder="Planted May 10, very productive, split after heavy rain…"></textarea>
+              </label>
+              <div class="row" style="margin-top:8px; justify-content:space-between">
+                <button class="btn small" id="sq-spread" type="button"></button>
+                <button class="btn small danger" id="sq-clear" type="button">Clear notes</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="plant-notes" id="plant-notes"></div>
+
+          <label class="field" style="margin-top:14px">Plan notes
             <textarea id="plan-notes" maxlength="5000" placeholder="Planting dates, varieties, what worked…"></textarea>
           </label>
         </div>
