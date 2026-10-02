@@ -9,7 +9,7 @@
 </head>
 <body>
   <header class="top">
-    <h1><span aria-hidden="true">🌱</span> Garden Tracker</h1>
+    <h1><span aria-hidden="true">🌱</span> <span class="title-text">Garden Tracker</span></h1>
     <nav class="main-nav" id="main-nav">
       <button data-view="planner">Garden Planner</button>
       <button data-view="harvest">Harvest Tracker</button>
@@ -36,14 +36,18 @@
             <button class="btn small" data-mode="select" title="Click a planted block to add notes (S)">👆 Select / notes</button>
             <button class="btn small" data-mode="split" title="Click a square or drag a rectangle to make it a separate labeled block (U)">✂ Unmerge</button>
             <button class="btn small" data-mode="merge" title="Click or drag over split blocks to join them back together (M)">⊞ Merge</button>
+            <button class="btn small phone-only" type="button" data-act="undo" title="Undo">↶ Undo</button>
+            <button class="btn small phone-only" type="button" data-act="redo" title="Redo">↷ Redo</button>
           </div>
-          <div class="crop-list" id="palette-list"></div>
-          <form class="quick-add" id="palette-add">
-            <input type="text" placeholder="Add a plant…" maxlength="40" required>
-            <button class="btn small" type="submit">Add</button>
-          </form>
+          <div class="palette-plants">
+            <div class="crop-list" id="palette-list"></div>
+            <form class="quick-add" id="palette-add">
+              <input type="text" placeholder="Add a plant…" maxlength="40" required>
+              <button class="btn small" type="submit">Add</button>
+            </form>
+          </div>
           <p class="hint">Touching squares of the same plant share one label. Use Move to drag a block somewhere else, Unmerge to label part of a block on its own, and Merge to join it back.</p>
-          <p class="hint">Keys: B brush, R rectangle, V move, S select, U unmerge, M merge, E eraser, Esc closes notes. Ctrl+Z to undo, Ctrl+Y to redo. Blocks with a corner mark have notes.</p>
+          <p class="hint keys-hint">Keys: B brush, R rectangle, V move, S select, U unmerge, M merge, E eraser, Esc closes notes. Ctrl+Z to undo, Ctrl+Y to redo. Blocks with a corner mark have notes.</p>
         </aside>
         <div class="card">
           <div class="plan-toolbar">
@@ -61,6 +65,7 @@
             <button class="btn danger" id="plan-delete">Delete plan</button>
           </div>
           <div class="canvas-wrap" id="canvas-wrap"><canvas id="plan-canvas"></canvas></div>
+          <p class="hint touch-only" style="margin:6px 0 0">On a touchscreen, one finger uses the tool and two fingers scroll and pinch-zoom the grid. With Select, tap a block to open its notes.</p>
           <div class="grid-footer">
             <div class="legend-summary" id="plan-summary"></div>
             <div id="plan-hover">&nbsp;</div>

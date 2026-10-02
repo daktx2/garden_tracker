@@ -137,6 +137,24 @@ function showTipAt(html, cx, y) {
   tipEl.style.top = Math.max(8, Math.min(y, innerHeight - r.height - 8)) + 'px';
 }
 const hideTip = () => { tipEl.hidden = true; };
+
+// Phone-sized screen: matches the max-width: 640px layout in style.css.
+const isPhone = () => matchMedia('(max-width: 640px)').matches;
+
+// Hover tooltips that also work on touchscreens: with a mouse they follow the pointer;
+// with a finger, a tap shows the tooltip and it stays until you tap somewhere else.
+let tapHide = null; // {el, hide} for the tooltip opened by the last tap
+function onHover(el, show, hide) {
+  el.addEventListener('pointermove', show);
+  el.addEventListener('pointerdown', e => {
+    show(e);
+    if (e.pointerType === 'touch') tapHide = { el, hide };
+  });
+  el.addEventListener('pointerleave', e => { if (e.pointerType !== 'touch') hide(); });
+}
+document.addEventListener('pointerdown', e => {
+  if (tapHide && !tapHide.el.contains(e.target)) { tapHide.hide(); tapHide = null; }
+}, true);
 const tipRow = (color, label, value) =>
   `<div class="t-row">${color ? `<span class="swatch" style="background:${color}"></span>` : ''}${esc(label)}<span class="v">${esc(value)}</span></div>`;
 
@@ -364,7 +382,7 @@ const planner = (() => {
     if (m !== 'select' && selected) closePanel();
     renderPalette();
   }
-  $$('.palette .tools .btn').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+  $$('.palette .tools [data-mode]').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
 
   // ---------- per-square notes ----------
   const RATINGS = { 1: '👍 Liked', 2: '😐 Okay', '-1': "👎 Didn't like" };
@@ -451,6 +469,7 @@ const planner = (() => {
   function placePanel() {
     const panel = $('#square-panel');
     if (panel.hidden || !selected) return;
+    if (isPhone()) { panel.style.left = panel.style.top = ''; return; } // CSS docks it as a bottom sheet
     const pw = panel.offsetWidth, ph = panel.offsetHeight;
     const headerH = $('header.top').offsetHeight;
     const clampX = v => Math.min(Math.max(8, v), innerWidth - pw - 8);
@@ -479,7 +498,7 @@ const planner = (() => {
 
   // Drag the overlay by its header.
   $('#sq-head').addEventListener('pointerdown', e => {
-    if (e.target.closest('button')) return;
+    if (e.target.closest('button') || isPhone()) return;
     const panel = $('#square-panel');
     const start = { x: e.clientX, y: e.clientY, left: panel.offsetLeft, top: panel.offsetTop };
     $('#sq-head').setPointerCapture(e.pointerId);
@@ -934,12 +953,65 @@ const planner = (() => {
     return changed;
   }
 
+  // ---------- touch: one finger uses the tool, two fingers scroll and pinch-zoom the grid ----------
+  const touches = new Map();  // pointerId -> {x, y} of each finger on the grid
+  let pinch = null;           // active two-finger gesture
+  let tapSelect = null;       // square tapped with the Select tool; opened when the finger lifts
+
+  // Returns true once two fingers are down, i.e. the touch belongs to a pan/zoom gesture.
+  function touchDown(e) {
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    canvas.setPointerCapture(e.pointerId);
+    if (touches.size < 2) return false;
+    e.preventDefault();
+    tapSelect = null;
+    if (drag) { // the first finger had started using a tool; take that back
+      ({ cells, notes, groups } = drag.before);
+      drag = null;
+      canvas.style.cursor = '';
+      draw();
+    }
+    const m = pinchCenter(), r = canvas.getBoundingClientRect();
+    pinch = { dist: m.dist, zoom, gx: (m.x - r.left - RULER_L) / zoom, gy: (m.y - r.top - RULER_T) / zoom };
+    return true;
+  }
+  function pinchCenter() {
+    const [a, b] = [...touches.values()];
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, dist: Math.hypot(a.x - b.x, a.y - b.y) || 1 };
+  }
+  // Zoom by the change in finger spread, then scroll so the grid point that started
+  // between the fingers stays between them (this is also what pans the grid).
+  function movePinch() {
+    const m = pinchCenter();
+    const z = Math.round(Math.min(80, Math.max(14, pinch.zoom * m.dist / pinch.dist)));
+    if (z !== zoom) { zoom = z; $('#plan-zoom').value = z; draw(); }
+    const r = canvas.getBoundingClientRect(), wrap = $('#canvas-wrap');
+    const dx = r.left + RULER_L + pinch.gx * zoom - m.x, dy = r.top + RULER_T + pinch.gy * zoom - m.y;
+    const top = wrap.scrollTop;
+    wrap.scrollLeft += dx;
+    wrap.scrollTop += dy;
+    const rest = dy - (wrap.scrollTop - top); // grid can't scroll further: scroll the page
+    if (Math.abs(rest) >= 1) scrollBy(0, rest);
+  }
+  function touchUp(e) {
+    if (!touches.delete(e.pointerId)) return;
+    if (pinch && touches.size < 2) {
+      pinch = null;
+      try { localStorage.setItem('gt-zoom', zoom); } catch { /* ignore */ }
+    }
+  }
+
   canvas.addEventListener('pointerdown', e => {
     if (e.button !== 0 || !plan) return;
+    if (e.pointerType === 'touch' && touchDown(e)) return;
     const c = cellAt(e);
     if (!c) return;
     e.preventDefault();
-    if (mode === 'select' && !e.shiftKey) { selectSquare(c.x, c.y); return; }
+    if (mode === 'select' && !e.shiftKey) {
+      if (e.pointerType === 'touch') tapSelect = c; // wait: it may become a pinch
+      else selectSquare(c.x, c.y);
+      return;
+    }
     if (mode === 'move' && !e.shiftKey && !cells.has(KEY(c.x, c.y))) return; // nothing to pick up
     canvas.setPointerCapture(e.pointerId);
     drag = { mode: e.shiftKey ? 'rect' : mode, tool, start: c, end: c, last: c, before: snapshot(), changed: false };
@@ -958,6 +1030,10 @@ const planner = (() => {
   });
 
   canvas.addEventListener('pointermove', e => {
+    if (touches.has(e.pointerId)) {
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinch) { movePinch(); return; }
+    }
     const c = cellAt(e);
     if (c) {
       const k = KEY(c.x, c.y);
@@ -966,9 +1042,9 @@ const planner = (() => {
       $('#plan-hover').textContent = `Column ${c.x + 1}, row ${c.y + 1}: ${crop ? crop.name : 'empty'}` +
         (n && n.variety ? ` (${n.variety})` : '') + (n && RATINGS[n.rating] ? ` ${RATINGS[n.rating]}` : '');
       // Variety tooltip in every tool, shown under the block's label; nothing when the
-      // block has no variety or while painting.
+      // block has no variety, while painting, or for a finger (Select shows it there).
       const box = labelBoxes.get(k);
-      if (crop && n && n.variety && !drag && box) {
+      if (crop && n && n.variety && !drag && box && e.pointerType !== 'touch') {
         const r = canvas.getBoundingClientRect();
         showTipAt(`<div class="t-title" style="margin:0">${esc(n.variety)}</div>`, r.left + box.cx, r.top + box.below);
       } else hideTip();
@@ -1028,8 +1104,12 @@ const planner = (() => {
     drag = null;
     draw();
   }
-  canvas.addEventListener('pointerup', endDrag);
-  canvas.addEventListener('pointercancel', endDrag);
+  canvas.addEventListener('pointerup', e => {
+    touchUp(e);
+    if (tapSelect) { const c = tapSelect; tapSelect = null; selectSquare(c.x, c.y); }
+    endDrag();
+  });
+  canvas.addEventListener('pointercancel', e => { touchUp(e); tapSelect = null; endDrag(); });
   canvas.addEventListener('pointerleave', () => {
     hideTip();
     if (!drag) $('#plan-hover').innerHTML = '&nbsp;';
@@ -1063,6 +1143,9 @@ const planner = (() => {
   }
   $('#plan-undo').addEventListener('click', undo);
   $('#plan-redo').addEventListener('click', redo);
+  // copies in the phone's bottom dock, next to the tools
+  $('.palette [data-act="undo"]').addEventListener('click', undo);
+  $('.palette [data-act="redo"]').addEventListener('click', redo);
 
   document.addEventListener('keydown', e => {
     if (state.view !== 'planner' || !plan) return;
@@ -1255,11 +1338,10 @@ const charts = (() => {
   const hidden = {};   // chartKey -> Set of hidden series ids (legend toggles)
 
   function attachTips(el, tips) {
-    el.addEventListener('mousemove', e => {
+    onHover(el, e => {
       const t = e.target.closest('[data-tip]');
       if (t) showTip(tips[+t.dataset.tip], e); else hideTip();
-    });
-    el.addEventListener('mouseleave', hideTip);
+    }, hideTip);
   }
 
   // Horizontal bars, 4px rounded data-end, square at baseline.
@@ -1384,7 +1466,7 @@ const charts = (() => {
       el.appendChild(wrap);
       const svg = $('svg', wrap), xh = $('.xh', svg);
       const events = [...new Set(cum.flatMap(s => s.steps.map(p => p.t)))].sort((a, b) => a - b);
-      $('.hit', svg).addEventListener('mousemove', e => {
+      onHover($('.hit', svg), e => {
         if (!events.length) return;
         const r = svg.getBoundingClientRect();
         const t = t0 + ((e.clientX - r.left - m.l) / (width - m.l - m.r)) * (t1 - t0);
@@ -1398,8 +1480,7 @@ const charts = (() => {
         showTip(`<div class="t-title">${esc(tipTitle(near))}</div>` +
           (rows.length ? rows.map(r => tipRow(r.s.color, r.s.name, `${fmt(r.v)} ${unit}`)).join('') : '<div>Nothing yet</div>') +
           `<div class="hint" style="margin-top:4px">Running total</div>`, e);
-      });
-      $('.hit', svg).addEventListener('mouseleave', () => { xh.setAttribute('visibility', 'hidden'); hideTip(); });
+      }, () => { xh.setAttribute('visibility', 'hidden'); hideTip(); });
     };
     render();
   }

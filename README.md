@@ -44,6 +44,12 @@ A small, self-hosted app for **planning your garden layout** (square-foot grid) 
 
 **Crops**: one shared list used by both the planner and the tracker. You can set each crop's name, color and harvest unit.
 
+**Phones and tablets**: the same site adapts to touchscreens, with every feature available.
+- **Planner grid:** one finger uses the current tool. Two fingers scroll the grid and pinch to zoom.
+- **Phone layout:** the tools, Undo/Redo and plant list sit in a dock at the bottom of the screen, and block notes open as a sheet from the bottom.
+- **Charts:** tap a bar, square or line to see its tooltip, and tap anywhere else to close it.
+- **Touch targets:** buttons and fields are bigger on touchscreens, and text fields don't make the phone zoom in.
+
 ## Deploy with Portainer
 
 Portainer's web editor can't build an image from local files, so pick one of these:
