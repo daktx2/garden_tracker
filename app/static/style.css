@@ -180,12 +180,26 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
 .canvas-wrap canvas { display: block; touch-action: none; cursor: crosshair; }
 .grid-footer { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; color: var(--text-2); }
 .legend-summary { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+/* Floating notes overlay, positioned next to the selected square by JS */
 .square-panel {
-  margin-top: 14px; padding: 14px; border: 1px solid var(--accent);
-  border-radius: var(--radius); background: var(--accent-soft);
+  position: fixed; z-index: 30; width: min(360px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px); overflow: auto;
+  padding: 14px; border: 1px solid var(--border); border-top: 3px solid var(--accent);
+  border-radius: var(--radius); background: var(--surface);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.22);
 }
-.square-panel .card-head { margin-bottom: 8px; }
-.square-panel input[type=text], .square-panel textarea { background: var(--surface); }
+.square-panel .card-head { margin-bottom: 8px; cursor: move; user-select: none; }
+.square-panel .row > .field { flex: 1 1 100%; }
+.square-panel textarea { min-height: 80px; }
+
+/* Planner text size: everything in the planner scales from one setting */
+#view-planner { font-size: var(--planner-text, 14px); }
+#view-planner .hint, #view-planner label.field, #view-planner .btn.small,
+#view-planner .grid-footer, #view-planner .crop-chip .count,
+#view-planner .subtabs .sub, #view-planner table.data th { font-size: 0.86em; }
+#view-planner h2 { font-size: 1.15em; }
+#view-planner h3 { font-size: 1em; }
+#view-planner .rating button { font-size: 0.93em; }
 .rating { display: flex; gap: 4px; flex-wrap: wrap; }
 .rating button {
   border: 1px solid var(--border); background: var(--surface); border-radius: 999px;

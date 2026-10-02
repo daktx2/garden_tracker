@@ -39,7 +39,7 @@
             <input type="text" placeholder="Add a plant…" maxlength="40" required>
             <button class="btn small" type="submit">Add</button>
           </form>
-          <p class="hint">Keys: B brush, R rectangle, S select, E eraser. Ctrl+Z to undo, Ctrl+Y to redo. Squares with a corner mark have notes.</p>
+          <p class="hint">Keys: B brush, R rectangle, S select, E eraser, Esc closes notes. Ctrl+Z to undo, Ctrl+Y to redo. Squares with a corner mark have notes.</p>
         </aside>
         <div class="card">
           <div class="plan-toolbar">
@@ -48,7 +48,8 @@
             <label class="field">Width (ft)<input type="number" class="num-input" id="plan-width" min="1" max="200"></label>
             <label class="field">Length (ft)<input type="number" class="num-input" id="plan-height" min="1" max="200"></label>
             <button class="btn" id="plan-resize">Resize</button>
-            <label class="field">Zoom<input type="range" id="plan-zoom" min="14" max="64" value="34"></label>
+            <label class="field">Zoom<input type="range" id="plan-zoom" min="14" max="80" value="34"></label>
+            <label class="field">Text size<input type="range" id="plan-text" min="10" max="24" value="14"></label>
             <span class="spacer"></span>
             <span class="save-status" id="save-status"></span>
             <button class="btn" id="plan-undo" title="Undo (Ctrl+Z)">↶</button>
@@ -61,8 +62,8 @@
             <div id="plan-hover">&nbsp;</div>
           </div>
 
-          <div class="square-panel" id="square-panel" hidden>
-            <div class="card-head">
+          <div class="square-panel" id="square-panel" role="dialog" aria-label="Square notes" hidden>
+            <div class="card-head" id="sq-head" title="Drag to move">
               <h3 id="sq-title"></h3>
               <button class="icon-btn" id="sq-close" title="Close">✕</button>
             </div>

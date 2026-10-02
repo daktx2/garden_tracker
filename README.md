@@ -13,7 +13,8 @@ A small, self-hosted app for **planning your garden layout** (square-foot grid) 
 - Set the garden size in feet, up to 200 × 200.
 - Fill squares with the **Brush** (click or drag) or the **Rectangle** tool (drag, or hold Shift with the brush). The **Eraser** clears squares.
 - Undo and redo with Ctrl+Z and Ctrl+Y. Changes save automatically.
-- **Square notes:** use the **Select** tool (S) to click a planted square, then record its variety, whether you liked it (👍 / 😐 / 👎) and free-text notes.
+- **Text size** slider scales all planner text, including plant names on the grid. A name is drawn once across each row of matching squares and wraps onto two lines when it fits better that way.
+- **Square notes:** use the **Select** tool (S) to click a planted square. A notes overlay pops up next to it (drag its header to move it, Esc to close), where you record the variety, whether you liked it (👍 / 😐 / 👎) and free-text notes.
   - Squares with notes get a corner mark.
   - **Copy to connected squares** applies the same notes to a plant that spans several squares.
   - A **Plant notes** table under the grid lists every note in the plan; click a row to jump to that square.

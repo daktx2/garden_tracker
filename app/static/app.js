@@ -184,7 +184,7 @@ addEventListener('hashchange', route);
 // ====================================================================
 const planner = (() => {
   const KEY = (x, y) => x + y * 1024;
-  const RULER_L = 30, RULER_T = 20;
+  let RULER_L = 30, RULER_T = 20; // recomputed in draw() from the text size
   const canvas = $('#plan-canvas');
   const ctx = canvas.getContext('2d');
   let plan = null;              // current plan metadata
@@ -199,8 +199,19 @@ const planner = (() => {
   let saveTimer = null, savePromise = null, dirty = false;
   let drag = null;              // active pointer interaction
 
-  try { zoom = +localStorage.getItem('gt-zoom') || 34; } catch { /* storage unavailable */ }
+  let textSize = 14;            // planner text size in px (UI + labels on the grid)
+  let panelMoved = null;        // {left, top} once the notes overlay has been dragged
+
+  try {
+    zoom = +localStorage.getItem('gt-zoom') || 34;
+    textSize = +localStorage.getItem('gt-text') || 14;
+  } catch { /* storage unavailable */ }
   $('#plan-zoom').value = zoom;
+  $('#plan-text').value = textSize;
+  const applyTextSize = () => $('#view-planner').style.setProperty('--planner-text', textSize + 'px');
+  applyTextSize();
+  const labelFont = () => Math.round(textSize * 0.86);
+  const rulerFont = () => Math.max(9, Math.round(textSize * 0.75));
 
   function setStatus(s) { $('#save-status').textContent = s; }
 
@@ -338,7 +349,7 @@ const planner = (() => {
   });
   function setMode(m) {
     mode = m;
-    if (m !== 'select' && selected) { selected = null; renderSquarePanel(); draw(); }
+    if (m !== 'select' && selected) closePanel();
     renderPalette();
   }
   $$('.palette .tools .btn').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
@@ -371,12 +382,79 @@ const planner = (() => {
     return [...seen];
   }
 
+  function closePanel() {
+    selected = null;
+    panelMoved = null;
+    renderSquarePanel();
+    draw();
+  }
+
+  // Float the notes overlay beside the selected square, kept inside the viewport.
+  function placePanel() {
+    const panel = $('#square-panel');
+    if (panel.hidden || !selected) return;
+    const pw = panel.offsetWidth, ph = panel.offsetHeight;
+    const headerH = $('header.top').offsetHeight;
+    const clampX = v => Math.min(Math.max(8, v), innerWidth - pw - 8);
+    const clampY = v => Math.min(Math.max(headerH + 8, v), innerHeight - ph - 8);
+    if (panelMoved) {
+      panel.style.left = clampX(panelMoved.left) + 'px';
+      panel.style.top = clampY(panelMoved.top) + 'px';
+      return;
+    }
+    const r = canvas.getBoundingClientRect(), cs = cellSize();
+    const sx = r.left + RULER_L + selected.x * cs, sy = r.top + RULER_T + selected.y * cs;
+    let left = sx + cs + 14;                                // prefer the right of the square
+    if (left + pw > innerWidth - 8) left = sx - pw - 14;    // else the left
+    if (left < 8) {                                         // narrow screen: above/below
+      left = clampX(sx + cs / 2 - pw / 2);
+      const below = sy + cs + 14;
+      panel.style.top = clampY(below + ph <= innerHeight - 8 ? below : sy - ph - 14) + 'px';
+    } else {
+      panel.style.top = clampY(sy + cs / 2 - 40) + 'px';
+    }
+    panel.style.left = left + 'px';
+  }
+  $('#canvas-wrap').addEventListener('scroll', placePanel, { passive: true });
+  addEventListener('scroll', placePanel, { passive: true });
+  addEventListener('resize', placePanel);
+
+  // Drag the overlay by its header.
+  $('#sq-head').addEventListener('pointerdown', e => {
+    if (e.target.closest('button')) return;
+    const panel = $('#square-panel');
+    const start = { x: e.clientX, y: e.clientY, left: panel.offsetLeft, top: panel.offsetTop };
+    $('#sq-head').setPointerCapture(e.pointerId);
+    const move = ev => {
+      panelMoved = { left: start.left + ev.clientX - start.x, top: start.top + ev.clientY - start.y };
+      placePanel();
+    };
+    const up = () => {
+      $('#sq-head').removeEventListener('pointermove', move);
+      $('#sq-head').removeEventListener('pointerup', up);
+    };
+    $('#sq-head').addEventListener('pointermove', move);
+    $('#sq-head').addEventListener('pointerup', up);
+  });
+
+  // Scroll the grid (and page) so a square is on screen.
+  function revealSquare(x, y) {
+    const wrap = $('#canvas-wrap'), cs = cellSize();
+    const px = RULER_L + x * cs, py = RULER_T + y * cs;
+    if (px < wrap.scrollLeft || px + cs > wrap.scrollLeft + wrap.clientWidth) wrap.scrollLeft = px - wrap.clientWidth / 2;
+    if (py < wrap.scrollTop || py + cs > wrap.scrollTop + wrap.clientHeight) wrap.scrollTop = py - wrap.clientHeight / 2;
+    const r = canvas.getBoundingClientRect();
+    const vy = r.top + py;
+    if (vy < $('header.top').offsetHeight + 8 || vy + cs > innerHeight - 8) scrollBy(0, vy - innerHeight / 2);
+  }
+
   function renderSquarePanel() {
     const panel = $('#square-panel');
     if (!plan || !selected) { panel.hidden = true; return; }
     const k = KEY(selected.x, selected.y);
     const crop = state.cropById.get(cells.get(k));
     panel.hidden = false;
+    requestAnimationFrame(placePanel);
     $('#sq-title').innerHTML = (crop ? `<span class="swatch" style="background:${crop.color}"></span>${esc(crop.name)}` : 'Empty square') +
       ` <span class="hint">· column ${selected.x + 1}, row ${selected.y + 1}</span>`;
     $('#sq-empty').hidden = !!crop;
@@ -437,7 +515,8 @@ const planner = (() => {
     changed(); draw();
     toast('Notes copied');
   });
-  $('#sq-close').addEventListener('click', () => { selected = null; renderSquarePanel(); draw(); });
+  $('#sq-close').addEventListener('click', closePanel);
+  $('#square-panel').addEventListener('keydown', e => { if (e.key === 'Escape') closePanel(); });
 
   // Table of every note in this plan; identical notes on several squares are merged.
   function renderPlantNotes() {
@@ -467,8 +546,8 @@ const planner = (() => {
     if (!tr) return;
     const k = +tr.dataset.k;
     setMode('select');
+    revealSquare(k % 1024, Math.floor(k / 1024));
     selectSquare(k % 1024, Math.floor(k / 1024));
-    $('#square-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   });
   $('#palette-add').addEventListener('submit', async e => {
     e.preventDefault();
@@ -487,6 +566,9 @@ const planner = (() => {
   function draw() {
     if (!plan) return;
     const cs = cellSize();
+    ctx.font = `${rulerFont()}px system-ui, sans-serif`;
+    RULER_L = Math.max(30, Math.ceil(ctx.measureText(String(plan.height)).width) + 14);
+    RULER_T = Math.max(20, rulerFont() + 10);
     const W = RULER_L + plan.width * cs + 1, H = RULER_T + plan.height * cs + 1;
     const dpr = window.devicePixelRatio || 1;
     canvas.width = W * dpr; canvas.height = H * dpr;
@@ -499,9 +581,10 @@ const planner = (() => {
 
     // rulers (1-based feet)
     ctx.fillStyle = muted;
-    ctx.font = '10px system-ui, sans-serif';
+    ctx.font = `${rulerFont()}px system-ui, sans-serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    const every = cs >= 22 ? 1 : cs >= 16 ? 2 : 5;
+    const numW = ctx.measureText(String(Math.max(plan.width, plan.height))).width;
+    const every = cs >= numW + 6 ? 1 : cs * 2 >= numW + 6 ? 2 : 5;
     for (let x = 0; x < plan.width; x++) {
       if ((x + 1) % every === 0 || x === 0) ctx.fillText(x + 1, RULER_L + x * cs + cs / 2, RULER_T / 2);
     }
@@ -542,20 +625,36 @@ const planner = (() => {
     }
     ctx.globalAlpha = 1;
 
-    // labels inside planted squares (identity is never color alone)
-    if (cs >= 24) {
-      ctx.font = `${cs >= 44 ? 12 : 10}px system-ui, sans-serif`;
+    // Plant labels (identity is never color alone). Each horizontal run of the same
+    // crop gets one label centered across the run, so names can use the run's full
+    // width; names wrap onto extra lines when the square is tall enough.
+    const fs = labelFont(), lineH = Math.round(fs * 1.2);
+    const maxLines = Math.floor((cs - 2) / lineH);
+    if (maxLines >= 1) {
+      ctx.font = `${fs}px system-ui, sans-serif`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      const labelCache = new Map();
+      const cache = new Map();
+      const cropAt = (x, y) => {
+        if (preview && x >= preview.x0 && x <= preview.x1 && y >= preview.y0 && y <= preview.y1) return drag.tool;
+        return cells.get(KEY(x, y)) || 0;
+      };
       for (let y = 0; y < plan.height; y++) {
-        for (let x = 0; x < plan.width; x++) {
-          let c = cells.get(KEY(x, y)) || 0;
-          if (preview && x >= preview.x0 && x <= preview.x1 && y >= preview.y0 && y <= preview.y1) c = drag.tool;
+        for (let x = 0; x < plan.width;) {
+          const c = cropAt(x, y);
+          let end = x;
+          while (end + 1 < plan.width && cropAt(end + 1, y) === c) end++;
           const crop = c && state.cropById.get(c);
-          if (!crop) continue;
-          if (!labelCache.has(c)) labelCache.set(c, fitLabel(crop.name, cs - 4));
-          ctx.fillStyle = textOn(crop.color);
-          ctx.fillText(labelCache.get(c), RULER_L + x * cs + cs / 2, RULER_T + y * cs + cs / 2 + 0.5);
+          if (crop) {
+            const runW = (end - x + 1) * cs - 6;
+            const ck = `${c}|${runW}`;
+            if (!cache.has(ck)) cache.set(ck, layoutLabel(crop.name, runW, maxLines));
+            const lines = cache.get(ck);
+            const cx = RULER_L + ((x + end + 1) / 2) * cs;
+            const top = RULER_T + y * cs + cs / 2 - ((lines.length - 1) * lineH) / 2 + 0.5;
+            ctx.fillStyle = textOn(crop.color);
+            lines.forEach((ln, i) => ctx.fillText(ln, cx, top + i * lineH));
+          }
+          x = end + 1;
         }
       }
     }
@@ -581,15 +680,37 @@ const planner = (() => {
       ctx.strokeStyle = cssVar('--surface');
       ctx.strokeRect(RULER_L + selected.x * cs + 3.75, RULER_T + selected.y * cs + 3.75, cs - 7.5, cs - 7.5);
     }
+    placePanel();
   }
 
-  function fitLabel(name, width) {
-    if (ctx.measureText(name).width <= width) return name;
-    for (let n = name.length - 1; n >= 1; n--) {
-      const s = name.slice(0, n);
-      if (ctx.measureText(s).width <= width) return s;
+  const fits = (s, w) => ctx.measureText(s).width <= w;
+
+  function truncate(s, width) {
+    if (fits(s, width)) return s;
+    for (let n = s.length - 1; n >= 1; n--) {
+      const t = s.slice(0, n).trimEnd() + '…';
+      if (fits(t, width)) return t;
     }
     return '';
+  }
+
+  // Wrap a name into at most maxLines lines of the given width; truncate with … if it won't fit.
+  function layoutLabel(name, width, maxLines) {
+    if (fits(name, width)) return [name];
+    if (maxLines === 1) return [truncate(name, width)].filter(Boolean);
+    const lines = [];
+    let cur = '';
+    for (const word of name.split(/\s+/)) {
+      const next = cur ? `${cur} ${word}` : word;
+      if (!cur || fits(next, width)) cur = next;
+      else { lines.push(cur); cur = word; }
+    }
+    if (cur) lines.push(cur);
+    if (lines.length > maxLines) {
+      lines.length = maxLines;
+      lines[maxLines - 1] += '…';
+    }
+    return lines.map(l => truncate(l, width)).filter(Boolean);
   }
 
   function cellAt(e) {
@@ -716,12 +837,18 @@ const planner = (() => {
     else if (k === 'b') setMode('brush');
     else if (k === 'r') setMode('rect');
     else if (k === 's') setMode('select');
-    else if (k === 'escape' && selected) { selected = null; renderSquarePanel(); draw(); }
+    else if (k === 'escape' && selected) closePanel();
   });
 
   $('#plan-zoom').addEventListener('input', e => {
     zoom = +e.target.value;
     try { localStorage.setItem('gt-zoom', zoom); } catch { /* ignore */ }
+    draw();
+  });
+  $('#plan-text').addEventListener('input', e => {
+    textSize = +e.target.value;
+    try { localStorage.setItem('gt-text', textSize); } catch { /* ignore */ }
+    applyTextSize();
     draw();
   });
 
