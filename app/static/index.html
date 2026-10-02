@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Garden Tracker</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌱</text></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <h1><span aria-hidden="true">🌱</span> Garden Tracker</h1>
+    <nav class="main-nav" id="main-nav">
+      <button data-view="planner">Garden Planner</button>
+      <button data-view="harvest">Harvest Tracker</button>
+      <button data-view="crops">Crops</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- ================= PLANNER ================= -->
+    <section id="view-planner" hidden>
+      <div class="subtabs" id="plan-tabs"></div>
+      <div id="planner-empty" class="card empty" hidden>
+        <div class="big">🪴</div>
+        <p>No garden plans yet. Create your first one to start laying out your beds.</p>
+        <button class="btn primary" id="planner-empty-new">Create a garden plan</button>
+      </div>
+      <div id="planner-body" class="planner" hidden>
+        <aside class="card palette">
+          <div class="card-head" style="margin-bottom:8px"><h2>Plants</h2></div>
+          <div class="tools">
+            <button class="btn small" data-mode="brush" title="Click or drag to paint squares">🖌 Brush</button>
+            <button class="btn small" data-mode="rect" title="Drag to fill a rectangle">▭ Rectangle</button>
+          </div>
+          <div class="crop-list" id="palette-list"></div>
+          <form class="quick-add" id="palette-add">
+            <input type="text" placeholder="Add a plant…" maxlength="40" required>
+            <button class="btn small" type="submit">Add</button>
+          </form>
+          <p class="hint">Ctrl+Z to undo, Ctrl+Y to redo. Press E to switch to the eraser.</p>
+        </aside>
+        <div class="card">
+          <div class="plan-toolbar">
+            <label class="field">Plan name<input type="text" class="name-input" id="plan-name" maxlength="60"></label>
+            <label class="field">Year<input type="number" class="num-input" id="plan-year" min="1900" max="2200"></label>
+            <label class="field">Width (ft)<input type="number" class="num-input" id="plan-width" min="1" max="200"></label>
+            <label class="field">Length (ft)<input type="number" class="num-input" id="plan-height" min="1" max="200"></label>
+            <button class="btn" id="plan-resize">Resize</button>
+            <label class="field">Zoom<input type="range" id="plan-zoom" min="14" max="64" value="34"></label>
+            <span class="spacer"></span>
+            <span class="save-status" id="save-status"></span>
+            <button class="btn" id="plan-undo" title="Undo (Ctrl+Z)">↶</button>
+            <button class="btn" id="plan-redo" title="Redo (Ctrl+Y)">↷</button>
+            <button class="btn danger" id="plan-delete">Delete plan</button>
+          </div>
+          <div class="canvas-wrap" id="canvas-wrap"><canvas id="plan-canvas"></canvas></div>
+          <div class="grid-footer">
+            <div class="legend-summary" id="plan-summary"></div>
+            <div id="plan-hover">&nbsp;</div>
+          </div>
+          <label class="field" style="margin-top:14px">Notes
+            <textarea id="plan-notes" maxlength="5000" placeholder="Planting dates, varieties, what worked…"></textarea>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= HARVEST ================= -->
+    <section id="view-harvest" hidden>
+      <div class="subtabs" id="year-tabs"></div>
+      <div id="harvest-year" class="stack" hidden>
+        <div class="card">
+          <div class="card-head"><h2 id="entry-title">Log a harvest</h2></div>
+          <form class="entry-form" id="entry-form">
+            <label class="field">Date<input type="date" id="entry-date" required></label>
+            <label class="field">Crop<select id="entry-crop" required></select></label>
+            <label class="field">Amount
+              <span class="amount-wrap"><input type="number" id="entry-amount" step="any" min="0" required><span class="unit-label" id="entry-unit"></span></span>
+            </label>
+            <label class="field notes">Notes (optional)<input type="text" id="entry-notes" maxlength="500"></label>
+            <button class="btn primary" type="submit" id="entry-submit">Add</button>
+            <button class="btn" type="button" id="entry-cancel" hidden>Cancel</button>
+          </form>
+          <p class="hint" id="entry-hint" hidden>No crops yet. Type a crop name in the form above, or add crops on the Crops tab.</p>
+        </div>
+        <div class="tiles" id="year-tiles"></div>
+        <div id="year-charts" class="chart-grid"></div>
+        <div class="card">
+          <div class="card-head"><h2>Totals by crop</h2></div>
+          <div class="table-wrap" id="year-totals"></div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <h2>Harvest log</h2>
+            <div class="row">
+              <select id="log-filter"></select>
+              <a class="btn" id="export-csv" href="#">Export CSV</a>
+            </div>
+          </div>
+          <div class="table-wrap" id="year-log"></div>
+        </div>
+      </div>
+      <div id="harvest-compare" class="stack" hidden></div>
+    </section>
+
+    <!-- ================= CROPS ================= -->
+    <section id="view-crops" hidden>
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Crops</h2>
+            <p class="hint" style="margin:4px 0 0">These crops are used in both the planner and the harvest tracker. The unit sets how harvests of that crop are measured.</p>
+          </div>
+        </div>
+        <form class="row" id="crop-add" style="margin-bottom:16px">
+          <label class="field">Name<input type="text" id="crop-add-name" maxlength="40" required placeholder="e.g. Tomato"></label>
+          <label class="field">Color<input type="color" id="crop-add-color"></label>
+          <label class="field">Unit<select id="crop-add-unit"></select></label>
+          <button class="btn primary" type="submit">Add crop</button>
+        </form>
+        <div class="table-wrap" id="crops-table"></div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="plan-dialog">
+    <form method="dialog" id="plan-dialog-form">
+      <h2>New garden plan</h2>
+      <label class="field">Name<input type="text" id="np-name" maxlength="60" required></label>
+      <div class="row">
+        <label class="field" style="flex:1">Year<input type="number" id="np-year" min="1900" max="2200" required></label>
+        <label class="field" style="flex:1">Width (ft)<input type="number" id="np-width" min="1" max="200" value="10" required></label>
+        <label class="field" style="flex:1">Length (ft)<input type="number" id="np-height" min="1" max="200" value="10" required></label>
+      </div>
+      <label class="field">Start from<select id="np-copy"></select></label>
+      <div class="actions">
+        <button class="btn" type="button" id="np-cancel">Cancel</button>
+        <button class="btn primary" type="submit" value="ok">Create plan</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="confirm-dialog">
+    <h2 id="confirm-title">Are you sure?</h2>
+    <p id="confirm-text"></p>
+    <div class="actions">
+      <button class="btn" id="confirm-no">Cancel</button>
+      <button class="btn primary" id="confirm-yes">Delete</button>
+    </div>
+  </dialog>
+
+  <div class="tooltip" id="tooltip" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>

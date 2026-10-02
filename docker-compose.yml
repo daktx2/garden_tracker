@@ -1,0 +1,17 @@
+name: garden-tracker        # fixed project name, so the data volume doesn't depend on the folder name
+
+services:
+  garden-tracker:
+    build: .
+    image: garden-tracker:latest
+    container_name: garden-tracker
+    restart: unless-stopped
+    ports:
+      - "8080:8080"          # change the left number to use a different port on the server
+    volumes:
+      - garden-data:/data    # SQLite database lives here - survives updates/rebuilds
+    mem_limit: 96m           # app normally uses ~20 MB
+    cpus: 0.5
+
+volumes:
+  garden-data:
