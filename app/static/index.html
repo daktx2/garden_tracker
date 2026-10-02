@@ -24,10 +24,11 @@
       <div id="planner-empty" class="card empty" hidden>
         <div class="big">🪴</div>
         <p>No garden plans yet. Create your first one to start laying out your beds.</p>
-        <button class="btn primary" id="planner-empty-new">Create a garden plan</button>
+        <p class="hint phone-hint">Garden plans are created on a computer.</p>
+        <button class="btn primary edit-only" id="planner-empty-new">Create a garden plan</button>
       </div>
       <div id="planner-body" class="planner" hidden>
-        <aside class="card palette">
+        <aside class="card palette edit-only">
           <div class="card-head" style="margin-bottom:8px"><h2>Plants</h2></div>
           <div class="tools">
             <button class="btn small" data-mode="brush" title="Click or drag to paint squares (B)">🖌 Brush</button>
@@ -36,8 +37,6 @@
             <button class="btn small" data-mode="select" title="Click a planted block to add notes (S)">👆 Select / notes</button>
             <button class="btn small" data-mode="split" title="Click a square or drag a rectangle to make it a separate labeled block (U)">✂ Unmerge</button>
             <button class="btn small" data-mode="merge" title="Click or drag over split blocks to join them back together (M)">⊞ Merge</button>
-            <button class="btn small phone-only" type="button" data-act="undo" title="Undo">↶ Undo</button>
-            <button class="btn small phone-only" type="button" data-act="redo" title="Redo">↷ Redo</button>
           </div>
           <div class="palette-plants">
             <div class="crop-list" id="palette-list"></div>
@@ -51,21 +50,22 @@
         </aside>
         <div class="card">
           <div class="plan-toolbar">
-            <label class="field">Plan name<input type="text" class="name-input" id="plan-name" maxlength="60"></label>
-            <label class="field">Year<input type="number" class="num-input" id="plan-year" min="1900" max="2200"></label>
-            <label class="field">Width (ft)<input type="number" class="num-input" id="plan-width" min="1" max="200"></label>
-            <label class="field">Length (ft)<input type="number" class="num-input" id="plan-height" min="1" max="200"></label>
-            <button class="btn" id="plan-resize">Resize</button>
+            <label class="field edit-only">Plan name<input type="text" class="name-input" id="plan-name" maxlength="60"></label>
+            <label class="field edit-only">Year<input type="number" class="num-input" id="plan-year" min="1900" max="2200"></label>
+            <label class="field edit-only">Width (ft)<input type="number" class="num-input" id="plan-width" min="1" max="200"></label>
+            <label class="field edit-only">Length (ft)<input type="number" class="num-input" id="plan-height" min="1" max="200"></label>
+            <button class="btn edit-only" id="plan-resize">Resize</button>
             <label class="field">Zoom<input type="range" id="plan-zoom" min="14" max="80" value="34"></label>
             <label class="field">Text size<input type="range" id="plan-text" min="10" max="24" value="14"></label>
             <span class="spacer"></span>
             <span class="save-status" id="save-status"></span>
             <button class="btn" id="plan-undo" title="Undo (Ctrl+Z)">↶</button>
             <button class="btn" id="plan-redo" title="Redo (Ctrl+Y)">↷</button>
-            <button class="btn danger" id="plan-delete">Delete plan</button>
+            <button class="btn danger edit-only" id="plan-delete">Delete plan</button>
           </div>
           <div class="canvas-wrap" id="canvas-wrap"><canvas id="plan-canvas"></canvas></div>
           <p class="hint touch-only" style="margin:6px 0 0">On a touchscreen, one finger uses the tool and two fingers scroll and pinch-zoom the grid. With Select, tap a block to open its notes.</p>
+          <p class="hint phone-hint" style="margin:6px 0 0">Tap a block to see and edit its notes. Drag to scroll, pinch to zoom. The layout is changed on a computer.</p>
           <div class="grid-footer">
             <div class="legend-summary" id="plan-summary"></div>
             <div id="plan-hover">&nbsp;</div>
@@ -156,7 +156,8 @@
             <p class="hint" style="margin:4px 0 0">These crops are used in both the planner and the harvest tracker. The unit sets how harvests of that crop are measured.</p>
           </div>
         </div>
-        <form class="row" id="crop-add" style="margin-bottom:16px">
+        <p class="hint phone-hint">Crops are edited on a computer.</p>
+        <form class="row edit-only" id="crop-add" style="margin-bottom:16px">
           <label class="field">Name<input type="text" id="crop-add-name" maxlength="40" required placeholder="e.g. Tomato"></label>
           <label class="field">Color<input type="color" id="crop-add-color"></label>
           <label class="field">Unit<select id="crop-add-unit"></select></label>

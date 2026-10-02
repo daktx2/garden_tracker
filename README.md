@@ -44,9 +44,13 @@ A small, self-hosted app for **planning your garden layout** (square-foot grid) 
 
 **Crops**: one shared list used by both the planner and the tracker. You can set each crop's name, color and harvest unit.
 
-**Phones and tablets**: the same site adapts to touchscreens, with every feature available.
-- **Planner grid:** one finger uses the current tool. Two fingers scroll the grid and pinch to zoom.
-- **Phone layout:** the tools, Undo/Redo and plant list sit in a dock at the bottom of the screen, and block notes open as a sheet from the bottom.
+**Phones and tablets**: the same site adapts to touchscreens.
+- **Tablets** have every feature. On the planner grid, one finger uses the current tool, and two fingers scroll and pinch to zoom.
+- **Phones** are for viewing the garden and keeping notes. Changing the layout and crops is done on a computer or tablet.
+  - **Planner:** drag to scroll and pinch to zoom. Tap a block to open its notes (variety, rating and text) in a sheet from the bottom. Plan notes can be edited too.
+  - **Off on phones:** painting, erasing, moving, merging, resizing, renaming, creating or deleting plans, and adding or editing crops.
+  - **Undo:** works for note edits. A step that changed the layout has to be undone on a computer.
+  - **Harvest tracker:** works fully on phones, so you can log harvests from the garden.
 - **Charts:** tap a bar, square or line to see its tooltip, and tap anywhere else to close it.
 - **Touch targets:** buttons and fields are bigger on touchscreens, and text fields don't make the phone zoom in.
 

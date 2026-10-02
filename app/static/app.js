@@ -138,8 +138,11 @@ function showTipAt(html, cx, y) {
 }
 const hideTip = () => { tipEl.hidden = true; };
 
-// Phone-sized screen: matches the max-width: 640px layout in style.css.
-const isPhone = () => matchMedia('(max-width: 640px)').matches;
+// Phone: a touchscreen that is narrow, or short in landscape. Must match the phone
+// @media query in style.css. On a phone the planner is view-only apart from notes, and
+// crops can't be edited.
+const phoneMQ = matchMedia('(pointer: coarse) and (max-width: 640px), (pointer: coarse) and (max-height: 500px)');
+const isPhone = () => phoneMQ.matches;
 
 // Hover tooltips that also work on touchscreens: with a mouse they follow the pointer;
 // with a finger, a tap shows the tooltip and it stays until you tap somewhere else.
@@ -288,7 +291,7 @@ const planner = (() => {
     const el = $('#plan-tabs');
     el.innerHTML = state.plans.map(p =>
       `<button data-id="${p.id}" class="${plan && plan.id === p.id ? 'active' : ''}">${esc(p.name)}<span class="sub">${p.year} · ${p.width}×${p.height} ft</span></button>`
-    ).join('') + `<button class="add" data-new="1">+ New plan</button>`;
+    ).join('') + `<button class="add edit-only" data-new="1">+ New plan</button>`;
   }
 
   $('#plan-tabs').addEventListener('click', e => {
@@ -953,17 +956,24 @@ const planner = (() => {
     return changed;
   }
 
-  // ---------- touch: one finger uses the tool, two fingers scroll and pinch-zoom the grid ----------
+  // ---------- touch ----------
+  // Tablet: one finger uses the tool, two fingers scroll and pinch-zoom the grid.
+  // Phone (view-only apart from notes): one finger scrolls and a tap opens a block's notes.
   const touches = new Map();  // pointerId -> {x, y} of each finger on the grid
-  let pinch = null;           // active two-finger gesture
-  let tapSelect = null;       // square tapped with the Select tool; opened when the finger lifts
+  let pinch = null;           // active pan/zoom gesture
+  let tapSelect = null;       // square tapped to open its notes; opened when the finger lifts
 
-  // Returns true once two fingers are down, i.e. the touch belongs to a pan/zoom gesture.
+  // Returns true when the touch belongs to a pan/zoom gesture rather than a tool.
   function touchDown(e) {
     touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
     canvas.setPointerCapture(e.pointerId);
-    if (touches.size < 2) return false;
+    if (touches.size < 2 && !isPhone()) return false;
     e.preventDefault();
+    if (touches.size === 1) { // phone: a tap opens notes unless the finger moves
+      tapSelect = cellAt(e);
+      startGesture(false);
+      return true;
+    }
     tapSelect = null;
     if (drag) { // the first finger had started using a tool; take that back
       ({ cells, notes, groups } = drag.before);
@@ -971,18 +981,27 @@ const planner = (() => {
       canvas.style.cursor = '';
       draw();
     }
-    const m = pinchCenter(), r = canvas.getBoundingClientRect();
-    pinch = { dist: m.dist, zoom, gx: (m.x - r.left - RULER_L) / zoom, gy: (m.y - r.top - RULER_T) / zoom };
+    startGesture(true);
     return true;
   }
+  function startGesture(moved) {
+    const m = pinchCenter(), r = canvas.getBoundingClientRect();
+    pinch = { x: m.x, y: m.y, dist: m.dist, zoom, moved,
+      gx: (m.x - r.left - RULER_L) / zoom, gy: (m.y - r.top - RULER_T) / zoom };
+  }
   function pinchCenter() {
-    const [a, b] = [...touches.values()];
+    const [a, b = a] = [...touches.values()];
     return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, dist: Math.hypot(a.x - b.x, a.y - b.y) || 1 };
   }
   // Zoom by the change in finger spread, then scroll so the grid point that started
   // between the fingers stays between them (this is also what pans the grid).
   function movePinch() {
     const m = pinchCenter();
+    if (!pinch.moved) { // one finger: still a tap until it travels a little
+      if (Math.hypot(m.x - pinch.x, m.y - pinch.y) < 8) return;
+      pinch.moved = true;
+      tapSelect = null;
+    }
     const z = Math.round(Math.min(80, Math.max(14, pinch.zoom * m.dist / pinch.dist)));
     if (z !== zoom) { zoom = z; $('#plan-zoom').value = z; draw(); }
     const r = canvas.getBoundingClientRect(), wrap = $('#canvas-wrap');
@@ -994,8 +1013,9 @@ const planner = (() => {
     if (Math.abs(rest) >= 1) scrollBy(0, rest);
   }
   function touchUp(e) {
-    if (!touches.delete(e.pointerId)) return;
-    if (pinch && touches.size < 2) {
+    if (!touches.delete(e.pointerId) || !pinch) return;
+    if (touches.size === 1 && isPhone()) startGesture(true); // keep scrolling with the finger left
+    else if (touches.size < 2) {
       pinch = null;
       try { localStorage.setItem('gt-zoom', zoom); } catch { /* ignore */ }
     }
@@ -1007,7 +1027,7 @@ const planner = (() => {
     const c = cellAt(e);
     if (!c) return;
     e.preventDefault();
-    if (mode === 'select' && !e.shiftKey) {
+    if ((mode === 'select' && !e.shiftKey) || isPhone()) { // phones only open notes
       if (e.pointerType === 'touch') tapSelect = c; // wait: it may become a pinch
       else selectSquare(c.x, c.y);
       return;
@@ -1106,7 +1126,12 @@ const planner = (() => {
   }
   canvas.addEventListener('pointerup', e => {
     touchUp(e);
-    if (tapSelect) { const c = tapSelect; tapSelect = null; selectSquare(c.x, c.y); }
+    if (tapSelect) {
+      const c = tapSelect;
+      tapSelect = null;
+      if (isPhone() && !cells.has(KEY(c.x, c.y))) { if (selected) closePanel(); } // nothing to note here
+      else selectSquare(c.x, c.y);
+    }
     endDrag();
   });
   canvas.addEventListener('pointercancel', e => { touchUp(e); tapSelect = null; endDrag(); });
@@ -1131,21 +1156,28 @@ const planner = (() => {
     noteEditOpen = false;
     changed(); draw();
   }
+  // A phone can only change notes, so there it may only undo/redo steps that differ from
+  // the current plan in notes alone, never a layout change made on a computer.
+  const sameMap = (a, b) => a.size === b.size && [...a].every(([k, v]) => b.get(k) === v);
+  function phoneBlocked(stack) {
+    const s = stack[stack.length - 1];
+    if (!isPhone() || (s.w === plan.width && s.h === plan.height &&
+        sameMap(s.cells, cells) && sameMap(s.groups, groups))) return false;
+    toast('That step changes the layout. Undo or redo it on a computer.', true);
+    return true;
+  }
   function undo() {
-    if (!undoStack.length) return;
+    if (!undoStack.length || phoneBlocked(undoStack)) return;
     redoStack.push(snapshot());
     restore(undoStack.pop());
   }
   function redo() {
-    if (!redoStack.length) return;
+    if (!redoStack.length || phoneBlocked(redoStack)) return;
     undoStack.push(snapshot());
     restore(redoStack.pop());
   }
   $('#plan-undo').addEventListener('click', undo);
   $('#plan-redo').addEventListener('click', redo);
-  // copies in the phone's bottom dock, next to the tools
-  $('.palette [data-act="undo"]').addEventListener('click', undo);
-  $('.palette [data-act="redo"]').addEventListener('click', redo);
 
   document.addEventListener('keydown', e => {
     if (state.view !== 'planner' || !plan) return;
@@ -1154,6 +1186,8 @@ const planner = (() => {
     if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
     else if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); }
     else if (e.ctrlKey || e.metaKey || e.altKey) return;
+    else if (k === 'escape' && selected) closePanel();
+    else if (isPhone()) return; // no layout tools on a phone
     else if (k === 'e') { tool = 0; if (mode === 'select') setMode('brush'); else renderPalette(); }
     else if (k === 'b') setMode('brush');
     else if (k === 'r') setMode('rect');
@@ -1161,7 +1195,6 @@ const planner = (() => {
     else if (k === 'v') setMode('move');
     else if (k === 'u') setMode('split');
     else if (k === 'm') setMode('merge');
-    else if (k === 'escape' && selected) closePanel();
   });
 
   $('#plan-zoom').addEventListener('input', e => {
@@ -1327,6 +1360,7 @@ const planner = (() => {
   });
 
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => draw());
+  phoneMQ.addEventListener('change', () => draw()); // e.g. rotating a phone: re-place the notes panel
 
   return { show, flush, redraw: () => { renderPalette(); draw(); } };
 })();
@@ -2007,6 +2041,13 @@ const cropsView = (() => {
       $('#crops-table').innerHTML = '<p class="hint">No crops yet. Add tomatoes, cucumbers, beans… above.</p>';
       return;
     }
+    if (isPhone()) { // read-only list; crops are edited on a computer
+      $('#crops-table').innerHTML = `<table class="data"><thead><tr><th>Crop</th><th>Unit</th><th>Used in</th></tr></thead><tbody>` +
+        state.crops.map(c => `<tr><td><span class="swatch" style="background:${c.color}"></span>${esc(c.name)}</td>
+          <td>${c.unit}</td><td class="hint">${c.cell_count} ft² · ${c.harvest_count} harvests</td></tr>`).join('') +
+        '</tbody></table>';
+      return;
+    }
     $('#crops-table').innerHTML = `<table class="data crops-table"><thead><tr><th>Color</th><th>Name</th><th>Harvest unit</th><th>Used in</th><th></th></tr></thead><tbody>` +
       state.crops.map(c => `<tr data-id="${c.id}">
         <td><input type="color" value="${c.color}" data-f="color"></td>
@@ -2057,6 +2098,8 @@ const cropsView = (() => {
       await show();
     } catch (err) { toast(err.message, true); }
   });
+
+  phoneMQ.addEventListener('change', () => { if (state.view === 'crops') render(); });
 
   return { show };
 })();

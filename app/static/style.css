@@ -267,7 +267,7 @@ tr.editing td { background: var(--accent-soft) !important; }
 .crops-table input[type=text] { width: 100%; max-width: 220px; }
 
 /* ---------- touchscreens ---------- */
-.touch-only, .phone-only { display: none; }
+.touch-only, .phone-hint { display: none; }
 @media (pointer: coarse) {
   .touch-only { display: block; }
   .keys-hint { display: none; }
@@ -285,9 +285,8 @@ tr.editing td { background: var(--accent-soft) !important; }
   input[type=range] { min-height: 32px; }
 }
 
-/* ---------- phones ---------- */
+/* ---------- small screens ---------- */
 @media (max-width: 640px) {
-  .phone-only { display: inline-block; }
   header.top { padding: 6px 10px; gap: 8px; flex-wrap: nowrap; }
   header.top h1 .title-text { display: none; }
   .main-nav { flex: 1; overflow-x: auto; scrollbar-width: none; }
@@ -296,37 +295,6 @@ tr.editing td { background: var(--accent-soft) !important; }
   .card { padding: 12px; }
   .subtabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-bottom: 10px; }
   .subtabs button { flex: none; white-space: nowrap; }
-
-  /* Planner: tools and plants dock to the bottom of the screen, within thumb reach */
-  .planner { gap: 10px; padding-bottom: 130px; }
-  .palette {
-    position: fixed; top: auto; left: 0; right: 0; bottom: 0; z-index: 25;
-    border-radius: 14px 14px 0 0; border-width: 1px 0 0;
-    padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
-    box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.14);
-  }
-  .palette > .card-head, .palette .hint { display: none !important; }
-  .palette .tools, .crop-list { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
-  .palette .tools { margin-bottom: 6px; }
-  .palette .tools .btn { flex: none; }
-  .palette-plants { display: flex; gap: 6px; align-items: center; }
-  .crop-list { flex-direction: row; flex: 1; max-height: none; gap: 6px; }
-  .crop-chip { width: auto; flex: none; border-color: var(--border); }
-  .crop-chip .name { max-width: 130px; }
-  .quick-add { margin-top: 0; flex: none; width: 150px; }
-
-  .plan-toolbar { gap: 8px; }
-  .plan-toolbar > .field:first-child { flex: 1 1 100%; }
-  .plan-toolbar .name-input { width: 100%; }
-  .plan-toolbar .spacer { display: none; }
-  .canvas-wrap { max-height: calc(100dvh - 250px); min-height: 220px; }
-
-  /* Notes open as a bottom sheet over the dock instead of floating beside the square */
-  .square-panel {
-    left: 0; right: 0; bottom: 0; top: auto; width: 100%; max-height: 70dvh;
-    border-radius: 14px 14px 0 0; padding-bottom: calc(14px + env(safe-area-inset-bottom));
-  }
-  .square-panel .card-head { cursor: default; }
   .plant-notes td.note-text { max-width: none; min-width: 160px; }
 
   /* Harvest */
@@ -339,4 +307,23 @@ tr.editing td { background: var(--accent-soft) !important; }
   .tile .value.hero { font-size: 28px; }
   .card-head .row { width: 100%; }
   .card-head .row select { flex: 1; }
+}
+
+/* ---------- phones (keep in sync with phoneMQ in app.js) ----------
+   The planner is view-only apart from block notes, and crops can't be edited. */
+@media (pointer: coarse) and (max-width: 640px), (pointer: coarse) and (max-height: 500px) {
+  .edit-only, .touch-only { display: none !important; }
+  .phone-hint { display: block; }
+  .planner { grid-template-columns: 1fr; gap: 10px; }
+  .plan-toolbar { gap: 8px; }
+  .plan-toolbar .spacer { display: none; }
+  .canvas-wrap { max-height: calc(100dvh - 190px); min-height: 220px; }
+  .canvas-wrap canvas { cursor: pointer; }
+
+  /* Notes open as a bottom sheet instead of floating beside the square */
+  .square-panel {
+    left: 0; right: 0; bottom: 0; top: auto; width: 100%; max-height: 70dvh;
+    border-radius: 14px 14px 0 0; padding-bottom: calc(14px + env(safe-area-inset-bottom));
+  }
+  .square-panel .card-head { cursor: default; }
 }
