@@ -887,8 +887,12 @@ const planner = (() => {
       const n = notes.get(k);
       $('#plan-hover').textContent = `Column ${c.x + 1}, row ${c.y + 1}: ${crop ? crop.name : 'empty'}` +
         (n && n.variety ? ` (${n.variety})` : '') + (n && RATINGS[n.rating] ? ` ${RATINGS[n.rating]}` : '');
+      // Variety tooltip in every tool; nothing when the square has no variety or while painting.
+      if (crop && n && n.variety && !drag) showTip(`<div class="t-title" style="margin:0">${esc(n.variety)}</div>`, e);
+      else hideTip();
     } else {
       $('#plan-hover').innerHTML = '&nbsp;';
+      hideTip();
     }
     if (!drag || !c) return;
     if (drag.mode === 'brush') {
@@ -920,7 +924,10 @@ const planner = (() => {
   }
   canvas.addEventListener('pointerup', endDrag);
   canvas.addEventListener('pointercancel', endDrag);
-  canvas.addEventListener('pointerleave', () => { if (!drag) $('#plan-hover').innerHTML = '&nbsp;'; });
+  canvas.addEventListener('pointerleave', () => {
+    hideTip();
+    if (!drag) $('#plan-hover').innerHTML = '&nbsp;';
+  });
 
   function changed() {
     renderPalette();
