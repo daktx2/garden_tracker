@@ -18,12 +18,12 @@ A small, self-hosted app for **planning your garden layout** (square-foot grid) 
   - **✂ Unmerge** (U): click a square, or drag a rectangle, to make it a separate block with its own label. A divider line shows the split.
   - **⊞ Merge** (M): click a split block, or drag across several, to join it back with its neighbours.
 - **✋ Move** (V): drag a planted block to a new spot. Its varieties, notes and ratings go with it. Squares it lands on are replaced, so use Ctrl+Z if you drop it in the wrong place.
-- **Square notes:** use the **Select** tool (S) to click a planted square. A notes overlay pops up next to it (drag its header to move it, Esc to close), where you record the variety, whether you liked it (👍 / 😐 / 👎) and free-text notes.
-  - Squares with notes get a corner mark.
-  - **Copy to connected squares** applies the same notes to a plant that spans several squares.
-  - A **Plant notes** table under the grid lists every note in the plan; click a row to jump to that square.
+- **Plant notes:** use the **Select** tool (S) to click a planted block. A notes overlay pops up next to it (drag its header to move it, Esc to close), where you record the variety, whether you liked it (👍 / 😐 / 👎) and free-text notes.
+  - Each block (one label) has a single note shared by all its squares. Blocks with notes get a corner mark, and hovering over a block shows its variety just under its label.
+  - When blocks join, by painting, merging or moving them together, their notes are combined: the varieties and note texts are joined, and the most common rating is kept.
+  - A **Plant notes** table under the grid lists every note in the plan; click a row to jump to that block.
   - When you copy a plan to a new year, varieties carry over, but ratings and notes start fresh.
-  - Painting a different plant over a square, or erasing it, removes that square's notes.
+  - Painting a different plant over a square, or erasing it, takes that square out of the block's note.
 - Each plan has a notes field and a list of how many ft² each crop takes up.
 
 **Harvest Tracker**

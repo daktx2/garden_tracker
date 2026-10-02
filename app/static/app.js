@@ -128,6 +128,14 @@ function showTip(html, e) {
   tipEl.style.left = Math.max(8, x) + 'px';
   tipEl.style.top = Math.max(8, y) + 'px';
 }
+// Tooltip centered horizontally on cx with its top at y (viewport px), kept on screen.
+function showTipAt(html, cx, y) {
+  tipEl.innerHTML = html;
+  tipEl.hidden = false;
+  const r = tipEl.getBoundingClientRect();
+  tipEl.style.left = Math.max(8, Math.min(cx - r.width / 2, innerWidth - r.width - 8)) + 'px';
+  tipEl.style.top = Math.max(8, Math.min(y, innerHeight - r.height - 8)) + 'px';
+}
 const hideTip = () => { tipEl.hidden = true; };
 const tipRow = (color, label, value) =>
   `<div class="t-row">${color ? `<span class="swatch" style="background:${color}"></span>` : ''}${esc(label)}<span class="v">${esc(value)}</span></div>`;
@@ -192,6 +200,8 @@ const planner = (() => {
   let notes = new Map();        // KEY -> {variety, rating, note} (only for planted squares)
   let groups = new Map();       // KEY -> label block id; absent/0 = merge with touching same-crop squares
   let selected = null;          // {x, y} square open in the notes panel
+  let labelBoxes = new Map();   // KEY -> {cx, below} label anchor of the square's block (canvas px), from draw()
+  let noteMarks = [];           // [px, py, color] corner marks for blocks with notes, from draw()
   let noteEditOpen = false;     // an undo snapshot was already taken for the current note edit
   let tool = 0;                 // crop id, 0 = eraser
   let mode = 'brush';
@@ -244,6 +254,7 @@ const planner = (() => {
       if (variety || rating || note) notes.set(KEY(x, y), { variety, rating, note });
       if (grp) groups.set(KEY(x, y), grp);
     }
+    const unified = unifyNotes(); // older plans may have different notes within one block
     undoStack = []; redoStack = [];
     selected = null;
     $('#plan-name').value = p.name;
@@ -256,6 +267,7 @@ const planner = (() => {
     if (!tool && state.crops.length) tool = state.crops[0].id;
     if (location.hash !== `#planner/${id}`) history.replaceState(null, '', `#planner/${id}`);
     renderTabs(); renderPalette(); renderSquarePanel(); draw();
+    if (unified) scheduleSave();
   }
 
   function renderTabs() {
@@ -388,6 +400,43 @@ const planner = (() => {
     return [...seen];
   }
 
+  // Every square in a label block shares one note (stored on each square). After squares
+  // join, merge or move, combine each block's notes: distinct varieties and note texts are
+  // joined top-left first, and the most common rating wins. Returns true if anything changed.
+  function unifyNotes() {
+    const seen = new Set();
+    let changedAny = false;
+    for (const k of [...cells.keys()].sort((a, b) => a - b)) {
+      if (seen.has(k)) continue;
+      const block = connectedSquares(k % 1024, Math.floor(k / 1024)).sort((a, b) => a - b);
+      for (const b of block) seen.add(b);
+      const n = joinNotes(block.map(b => notes.get(b)).filter(Boolean));
+      for (const b of block) {
+        if (sameNote(notes.get(b), n)) continue;
+        if (n) notes.set(b, n); else notes.delete(b);
+        changedAny = true;
+      }
+    }
+    return changedAny;
+  }
+
+  function joinNotes(list) {
+    const uniq = vals => [...new Set(vals.filter(v => v && v.trim()))];
+    const tally = new Map();
+    for (const n of list) if (n.rating) tally.set(n.rating, (tally.get(n.rating) || 0) + 1);
+    let rating = 0;
+    for (const [r, c] of tally) if (!rating || c > tally.get(rating)) rating = r;
+    const n = {
+      variety: uniq(list.map(n => n.variety)).join(' / ').slice(0, 80),
+      rating,
+      note: uniq(list.map(n => n.note)).join('\n').slice(0, 2000),
+    };
+    return n.variety || n.rating || n.note ? n : null;
+  }
+
+  const sameNote = (a, b) => (!a && !b) ||
+    (!!a && !!b && a.variety === b.variety && a.rating === b.rating && a.note === b.note);
+
   function closePanel() {
     selected = null;
     panelMoved = null;
@@ -461,8 +510,9 @@ const planner = (() => {
     const crop = state.cropById.get(cells.get(k));
     panel.hidden = false;
     requestAnimationFrame(placePanel);
+    const size = crop ? connectedSquares(selected.x, selected.y).length : 1;
     $('#sq-title').innerHTML = (crop ? `<span class="swatch" style="background:${crop.color}"></span>${esc(crop.name)}` : 'Empty square') +
-      ` <span class="hint">· column ${selected.x + 1}, row ${selected.y + 1}</span>`;
+      ` <span class="hint">· ${size > 1 ? `${size} squares` : `column ${selected.x + 1}, row ${selected.y + 1}`}</span>`;
     $('#sq-empty').hidden = !!crop;
     $('#sq-form').hidden = !crop;
     if (!crop) return;
@@ -474,9 +524,6 @@ const planner = (() => {
     const vs = new Set();
     for (const [kk, nn] of notes) if (nn.variety && cells.get(kk) === crop.id) vs.add(nn.variety);
     $('#sq-variety-list').innerHTML = [...vs].map(v => `<option value="${esc(v)}">`).join('');
-    const group = connectedSquares(selected.x, selected.y).length;
-    $('#sq-spread').hidden = group < 2;
-    $('#sq-spread').textContent = `Copy these notes to all ${group} connected ${crop.name} squares`;
   }
 
   function editNote(change) {
@@ -488,7 +535,10 @@ const planner = (() => {
       noteEditOpen = true;
     }
     const n = { ...noteAt(k), ...change };
-    if (n.variety || n.rating || n.note) notes.set(k, n); else notes.delete(k);
+    const keep = n.variety || n.rating || n.note;
+    for (const b of connectedSquares(selected.x, selected.y)) { // one note per block
+      if (keep) notes.set(b, n); else notes.delete(b);
+    }
     renderPlantNotes();
     scheduleSave();
     draw();
@@ -509,17 +559,6 @@ const planner = (() => {
     editNote({ variety: '', rating: 0, note: '' });
     noteEditOpen = false;
     renderSquarePanel();
-  });
-  $('#sq-spread').addEventListener('click', () => {
-    if (!selected) return;
-    const src = notes.get(KEY(selected.x, selected.y));
-    undoStack.push(snapshot()); redoStack = [];
-    noteEditOpen = false;
-    for (const k of connectedSquares(selected.x, selected.y)) {
-      if (src) notes.set(k, { ...src }); else notes.delete(k);
-    }
-    changed(); draw();
-    toast('Notes copied');
   });
   $('#sq-close').addEventListener('click', closePanel);
   $('#square-panel').addEventListener('keydown', e => { if (e.key === 'Escape') closePanel(); });
@@ -648,6 +687,9 @@ const planner = (() => {
         grp[y * gw + x] = c === cur ? groupOf(k) : 0;
       }
       const seen = new Uint8Array(gw * gh);
+      const keyOf = j => KEY(j % gw, Math.floor(j / gw));
+      labelBoxes = new Map();
+      noteMarks = [];
       for (let i = 0; i < grid.length; i++) {
         const c = grid[i];
         if (!c || seen[i]) continue;
@@ -666,9 +708,15 @@ const planner = (() => {
           }
         }
         const crop = state.cropById.get(c);
-        if (!crop || cs * 2 < lineH) continue;
+        if (!crop) continue;
         const r = largestRect(grid, gw, c, x0, y0, x1, y1, group);
-        drawLabel(crop, RULER_L + r.x * cs, RULER_T + r.y * cs, r.w * cs, r.h * cs, lineH);
+        const bx = RULER_L + r.x * cs, by = RULER_T + r.y * cs;
+        const half = cs * 2 < lineH ? 0 : drawLabel(crop, bx, by, r.w * cs, r.h * cs, lineH);
+        // the block's variety tooltip sits just under its label
+        const box = { cx: bx + r.w * cs / 2, below: by + r.h * cs / 2 + half + 4 };
+        for (const j of group) labelBoxes.set(keyOf(j), box);
+        // one corner mark per block with notes, on the label rectangle's top-right square
+        if (group.some(j => notes.has(keyOf(j)))) noteMarks.push([bx + r.w * cs, by, crop.color]);
       }
 
       // Divider lines where touching squares of the same crop are in different blocks.
@@ -703,26 +751,39 @@ const planner = (() => {
       ctx.restore();
     }
 
-    // corner mark on squares that have notes
+    // corner mark on blocks that have notes
     const mark = Math.max(5, Math.round(cs * 0.28));
-    for (const k of notes.keys()) {
-      const crop = state.cropById.get(cells.get(k));
-      if (!crop) continue;
-      const px = RULER_L + (k % 1024 + 1) * cs, py = RULER_T + Math.floor(k / 1024) * cs;
-      ctx.fillStyle = textOn(crop.color);
+    for (const [px, py, color] of noteMarks) {
+      ctx.fillStyle = textOn(color);
       ctx.beginPath();
       ctx.moveTo(px - mark, py + 1); ctx.lineTo(px - 1, py + 1); ctx.lineTo(px - 1, py + mark);
       ctx.closePath(); ctx.fill();
     }
 
-    // selected square outline
+    // outline around the selected block (or the selected empty square)
     if (selected) {
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = cssVar('--text');
-      ctx.strokeRect(RULER_L + selected.x * cs + 1.5, RULER_T + selected.y * cs + 1.5, cs - 3, cs - 3);
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = cssVar('--surface');
-      ctx.strokeRect(RULER_L + selected.x * cs + 3.75, RULER_T + selected.y * cs + 3.75, cs - 7.5, cs - 7.5);
+      const k0 = KEY(selected.x, selected.y);
+      const keys = cells.has(k0) ? connectedSquares(selected.x, selected.y) : [k0];
+      const inSel = new Set(keys);
+      const outline = (inset, width, color) => {
+        ctx.lineWidth = width;
+        ctx.strokeStyle = color;
+        ctx.beginPath();
+        for (const k of keys) {
+          const px = RULER_L + (k % 1024) * cs, py = RULER_T + Math.floor(k / 1024) * cs;
+          const l = inSel.has(k - 1) ? 0 : inset, r = inSel.has(k + 1) ? 0 : inset;
+          const t = inSel.has(k - 1024) ? 0 : inset, b = inSel.has(k + 1024) ? 0 : inset;
+          if (t) { ctx.moveTo(px + l, py + t); ctx.lineTo(px + cs - r, py + t); }
+          if (b) { ctx.moveTo(px + l, py + cs - b); ctx.lineTo(px + cs - r, py + cs - b); }
+          if (l) { ctx.moveTo(px + l, py + t); ctx.lineTo(px + l, py + cs - b); }
+          if (r) { ctx.moveTo(px + cs - r, py + t); ctx.lineTo(px + cs - r, py + cs - b); }
+        }
+        ctx.stroke();
+      };
+      ctx.lineCap = 'square';
+      outline(1.5, 3, cssVar('--text'));
+      outline(3.75, 1.5, cssVar('--surface'));
+      ctx.lineCap = 'butt';
     }
     placePanel();
   }
@@ -760,6 +821,7 @@ const planner = (() => {
 
   // Draw a crop name centered in a box: horizontal (wrapped) if it fits, otherwise
   // sideways when the box is taller than wide, otherwise truncated with …
+  // Returns half the drawn text's on-screen height (0 if nothing fit).
   function drawLabel(crop, bx, by, bw, bh, lineH) {
     const pad = 6;
     const horiz = layoutLabel(crop.name, bw - pad, Math.floor((bh - 2) / lineH));
@@ -769,7 +831,7 @@ const planner = (() => {
       const vert = layoutLabel(crop.name, bh - pad, Math.floor((bw - 2) / lineH));
       if (full(vert) || (vert.length && !horiz.length)) { lines = vert; rotate = true; }
     }
-    if (!lines.length) return;
+    if (!lines.length) return 0;
     ctx.save();
     ctx.translate(bx + bw / 2, by + bh / 2);
     if (rotate) ctx.rotate(-Math.PI / 2);
@@ -777,6 +839,7 @@ const planner = (() => {
     const top = -((lines.length - 1) * lineH) / 2 + 0.5;
     lines.forEach((ln, i) => ctx.fillText(ln, 0, top + i * lineH));
     ctx.restore();
+    return rotate ? Math.max(...lines.map(l => ctx.measureText(l).width)) / 2 : lines.length * lineH / 2;
   }
 
   const fits = (s, w) => ctx.measureText(s).width <= w;
@@ -899,9 +962,13 @@ const planner = (() => {
       const n = notes.get(k);
       $('#plan-hover').textContent = `Column ${c.x + 1}, row ${c.y + 1}: ${crop ? crop.name : 'empty'}` +
         (n && n.variety ? ` (${n.variety})` : '') + (n && RATINGS[n.rating] ? ` ${RATINGS[n.rating]}` : '');
-      // Variety tooltip in every tool; nothing when the square has no variety or while painting.
-      if (crop && n && n.variety && !drag) showTip(`<div class="t-title" style="margin:0">${esc(n.variety)}</div>`, e);
-      else hideTip();
+      // Variety tooltip in every tool, shown under the block's label; nothing when the
+      // block has no variety or while painting.
+      const box = labelBoxes.get(k);
+      if (crop && n && n.variety && !drag && box) {
+        const r = canvas.getBoundingClientRect();
+        showTipAt(`<div class="t-title" style="margin:0">${esc(n.variety)}</div>`, r.left + box.cx, r.top + box.below);
+      } else hideTip();
       if (!drag) canvas.style.cursor = mode === 'move' && crop ? 'grab' : '';
     } else {
       $('#plan-hover').innerHTML = '&nbsp;';
@@ -951,6 +1018,7 @@ const planner = (() => {
     }
     if (drag.mode === 'move') canvas.style.cursor = '';
     if (drag.changed) {
+      unifyNotes(); // blocks may have grown, merged or met another block
       undoStack.push(drag.before);
       if (undoStack.length > 60) undoStack.shift();
       redoStack = [];
