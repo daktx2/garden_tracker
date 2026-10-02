@@ -17,6 +17,7 @@ A small, self-hosted app for **planning your garden layout** (square-foot grid) 
 - **Unmerge / Merge:** squares of the same plant that touch, horizontally or vertically, share one label by default.
   - **✂ Unmerge** (U): click a square, or drag a rectangle, to make it a separate block with its own label. A divider line shows the split.
   - **⊞ Merge** (M): click a split block, or drag across several, to join it back with its neighbours.
+- **✋ Move** (V): drag a planted block to a new spot. Its varieties, notes and ratings go with it. Squares it lands on are replaced, so use Ctrl+Z if you drop it in the wrong place.
 - **Square notes:** use the **Select** tool (S) to click a planted square. A notes overlay pops up next to it (drag its header to move it, Esc to close), where you record the variety, whether you liked it (👍 / 😐 / 👎) and free-text notes.
   - Squares with notes get a corner mark.
   - **Copy to connected squares** applies the same notes to a plant that spans several squares.

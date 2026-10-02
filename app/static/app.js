@@ -352,6 +352,7 @@ const planner = (() => {
   });
   function setMode(m) {
     mode = m;
+    canvas.style.cursor = '';
     if (m !== 'select' && selected) closePanel();
     renderPalette();
   }
@@ -691,9 +692,9 @@ const planner = (() => {
       ctx.lineCap = 'butt';
     }
 
-    // outline of the area being unmerged/merged
-    if (drag && (drag.mode === 'split' || drag.mode === 'merge')) {
-      const r = rectOf(drag.start, drag.end);
+    // outline of the area being unmerged/merged, or of the block being moved
+    if (drag && (drag.mode === 'split' || drag.mode === 'merge' || drag.mode === 'move')) {
+      const r = drag.mode === 'move' ? drag.rect : rectOf(drag.start, drag.end);
       ctx.save();
       ctx.lineWidth = 2;
       ctx.setLineDash([6, 4]);
@@ -873,9 +874,20 @@ const planner = (() => {
     if (!c) return;
     e.preventDefault();
     if (mode === 'select' && !e.shiftKey) { selectSquare(c.x, c.y); return; }
+    if (mode === 'move' && !e.shiftKey && !cells.has(KEY(c.x, c.y))) return; // nothing to pick up
     canvas.setPointerCapture(e.pointerId);
     drag = { mode: e.shiftKey ? 'rect' : mode, tool, start: c, end: c, last: c, before: snapshot(), changed: false };
     if (drag.mode === 'brush') drag.changed = paint(c.x, c.y, tool);
+    if (drag.mode === 'move') {
+      drag.keys = connectedSquares(c.x, c.y);
+      drag.box = { x0: plan.width, y0: plan.height, x1: 0, y1: 0 };
+      for (const k of drag.keys) {
+        const x = k % 1024, y = Math.floor(k / 1024);
+        drag.box = { x0: Math.min(drag.box.x0, x), y0: Math.min(drag.box.y0, y), x1: Math.max(drag.box.x1, x), y1: Math.max(drag.box.y1, y) };
+      }
+      drag.rect = drag.box;
+      canvas.style.cursor = 'grabbing';
+    }
     draw();
   });
 
@@ -890,6 +902,7 @@ const planner = (() => {
       // Variety tooltip in every tool; nothing when the square has no variety or while painting.
       if (crop && n && n.variety && !drag) showTip(`<div class="t-title" style="margin:0">${esc(n.variety)}</div>`, e);
       else hideTip();
+      if (!drag) canvas.style.cursor = mode === 'move' && crop ? 'grab' : '';
     } else {
       $('#plan-hover').innerHTML = '&nbsp;';
       hideTip();
@@ -899,9 +912,32 @@ const planner = (() => {
       if (paintLine(drag.last, c, drag.tool)) { drag.changed = true; draw(); }
       drag.last = c;
     } else if (c.x !== drag.end.x || c.y !== drag.end.y) {
-      drag.end = c; draw();
+      drag.end = c;
+      if (drag.mode === 'move') moveBlock(drag);
+      draw();
     }
   });
+
+  // Move tool: rebuild the plan from the pre-drag snapshot with the picked-up block
+  // shifted by the drag offset (kept inside the garden). Its variety, notes, rating and
+  // block id travel with it; whatever was under the drop spot is replaced.
+  function moveBlock(d) {
+    const { before, keys, box } = d;
+    const dx = Math.min(Math.max(d.end.x - d.start.x, -box.x0), plan.width - 1 - box.x1);
+    const dy = Math.min(Math.max(d.end.y - d.start.y, -box.y0), plan.height - 1 - box.y1);
+    cells = new Map(before.cells); notes = new Map(before.notes); groups = new Map(before.groups);
+    d.rect = { x0: box.x0 + dx, y0: box.y0 + dy, x1: box.x1 + dx, y1: box.y1 + dy };
+    d.changed = !!(dx || dy);
+    if (!d.changed) return;
+    for (const k of keys) { cells.delete(k); notes.delete(k); groups.delete(k); }
+    for (const k of keys) {
+      const nk = k + dx + dy * 1024;
+      cells.set(nk, before.cells.get(k));
+      const n = before.notes.get(k), g = before.groups.get(k);
+      if (n) notes.set(nk, n); else notes.delete(nk);
+      if (g) groups.set(nk, g); else groups.delete(nk);
+    }
+  }
 
   function endDrag() {
     if (!drag) return;
@@ -913,6 +949,7 @@ const planner = (() => {
     } else if (drag.mode === 'split' || drag.mode === 'merge') {
       drag.changed = applyBlockTool(drag.mode, rectOf(drag.start, drag.end));
     }
+    if (drag.mode === 'move') canvas.style.cursor = '';
     if (drag.changed) {
       undoStack.push(drag.before);
       if (undoStack.length > 60) undoStack.shift();
@@ -964,6 +1001,7 @@ const planner = (() => {
     else if (k === 'b') setMode('brush');
     else if (k === 'r') setMode('rect');
     else if (k === 's') setMode('select');
+    else if (k === 'v') setMode('move');
     else if (k === 'u') setMode('split');
     else if (k === 'm') setMode('merge');
     else if (k === 'escape' && selected) closePanel();
