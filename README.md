@@ -12,7 +12,7 @@ A small, self-hosted app for **planning your garden layout** (square-foot grid) 
 - Make a plan for each year, each with its own tab. You can start a new plan blank or as a copy of a previous one.
 - Set the garden size in feet, up to 200 × 200.
 - Fill squares with the **Brush** (click or drag) or the **Rectangle** tool (drag, or hold Shift with the brush). The **Eraser** clears squares.
-- Undo and redo with Ctrl+Z and Ctrl+Y. Changes save automatically.
+- Undo and redo with Ctrl+Z and Ctrl+Y. Changes save automatically. Each plan keeps its last 60 steps of undo history on the server, so you can still undo after reloading the page, switching plans or opening it on another device.
 - **Text size** slider scales all planner text, including plant names on the grid. Each connected block of the same plant gets one label, centered in the block. The label wraps onto more lines when needed, or turns sideways in tall, narrow beds.
 - **Unmerge / Merge:** squares of the same plant that touch, horizontally or vertically, share one label by default.
   - **✂ Unmerge** (U): click a square, or drag a rectangle, to make it a separate block with its own label. A divider line shows the split.

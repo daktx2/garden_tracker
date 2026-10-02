@@ -20,6 +20,7 @@ DB_PATH = os.path.join(DATA_DIR, "garden.db")
 STATIC_DIR = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "static"))
 PORT = int(os.environ.get("PORT", "8080"))
 MAX_DIM = 200  # max garden width/height in feet
+MAX_HISTORY = 3_000_000  # max bytes of saved undo/redo history per plan
 UNITS = ("lb", "oz", "kg", "g", "count", "bunch")
 
 # Default colors handed out in order to new crops (validated categorical order).
@@ -55,6 +56,10 @@ CREATE TABLE IF NOT EXISTS plan_cells (
     grp INTEGER NOT NULL DEFAULT 0,      -- label block; 0 = merge with touching squares of same crop
     PRIMARY KEY (plan_id, x, y)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS plan_history (
+    plan_id INTEGER PRIMARY KEY REFERENCES plans(id) ON DELETE CASCADE,
+    data TEXT NOT NULL                   -- JSON {"undo": [...], "redo": [...]} saved by the planner
+);
 CREATE TABLE IF NOT EXISTS harvests (
     id INTEGER PRIMARY KEY,
     date TEXT NOT NULL,
@@ -235,7 +240,22 @@ def plan_with_cells(conn, plan_id):
 
 
 def get_plan(conn, q, body, plan_id):
-    return plan_with_cells(conn, plan_id)
+    plan = plan_with_cells(conn, plan_id)
+    row = conn.execute("SELECT data FROM plan_history WHERE plan_id = ?", (plan_id,)).fetchone()
+    plan["history"] = json.loads(row[0]) if row else None
+    return plan
+
+
+def save_history(conn, plan_id, history):
+    """Store the planner's undo/redo stacks so they survive reloads. The client keeps them
+    under the size cap; anything malformed or too big is ignored so the plan still saves."""
+    if not (isinstance(history, dict) and isinstance(history.get("undo"), list)
+            and isinstance(history.get("redo"), list)):
+        return
+    data = json.dumps({"undo": history["undo"], "redo": history["redo"]}, separators=(",", ":"))
+    if len(data) <= MAX_HISTORY:
+        conn.execute("INSERT OR REPLACE INTO plan_history (plan_id, data) VALUES (?, ?)",
+                     (plan_id, data))
 
 
 def create_plan(conn, q, body):
@@ -301,6 +321,8 @@ def update_plan(conn, q, body, plan_id):
     else:
         conn.execute("DELETE FROM plan_cells WHERE plan_id = ? AND (x >= ? OR y >= ?)",
                      (plan_id, width, height))
+    if "history" in body:
+        save_history(conn, plan_id, body["history"])
     return plan_with_cells(conn, plan_id)
 
 

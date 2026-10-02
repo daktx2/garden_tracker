@@ -206,7 +206,8 @@ const planner = (() => {
   let tool = 0;                 // crop id, 0 = eraser
   let mode = 'brush';
   let zoom = 34;
-  let undoStack = [], redoStack = [];
+  let undoStack = [], redoStack = [];  // snapshots; saved with the plan (see packHistory)
+  const HISTORY_STEPS = 60, HISTORY_BYTES = 2_000_000;
   let saveTimer = null, savePromise = null, dirty = false;
   let drag = null;              // active pointer interaction
 
@@ -247,15 +248,10 @@ const planner = (() => {
     await flush();
     const p = await api('GET', `/api/plans/${id}`);
     plan = p;
-    cells = new Map(p.cells.map(([x, y, c]) => [KEY(x, y), c]));
-    notes = new Map();
-    groups = new Map();
-    for (const [x, y, , variety, rating, note, grp] of p.cells) {
-      if (variety || rating || note) notes.set(KEY(x, y), { variety, rating, note });
-      if (grp) groups.set(KEY(x, y), grp);
-    }
+    ({ cells, notes, groups } = unpackCells(p.cells));
     const unified = unifyNotes(); // older plans may have different notes within one block
-    undoStack = []; redoStack = [];
+    undoStack = (p.history ? p.history.undo : []).map(unpackSnap);
+    redoStack = (p.history ? p.history.redo : []).map(unpackSnap);
     selected = null;
     $('#plan-name').value = p.name;
     $('#plan-year').value = p.year;
@@ -372,7 +368,14 @@ const planner = (() => {
 
   // ---------- per-square notes ----------
   const RATINGS = { 1: '👍 Liked', 2: '😐 Okay', '-1': "👎 Didn't like" };
-  const snapshot = () => ({ cells: new Map(cells), notes: new Map(notes), groups: new Map(groups) });
+  const snapshot = () => ({
+    cells: new Map(cells), notes: new Map(notes), groups: new Map(groups), w: plan.width, h: plan.height,
+  });
+  function pushUndo(snap) {
+    undoStack.push(snap);
+    if (undoStack.length > HISTORY_STEPS) undoStack.shift();
+    redoStack = [];
+  }
   const groupOf = k => groups.get(k) || 0;
 
   function selectSquare(x, y) {
@@ -531,7 +534,7 @@ const planner = (() => {
     const k = KEY(selected.x, selected.y);
     if (!cells.has(k)) return;
     if (!noteEditOpen) { // one undo step per editing session on a square
-      undoStack.push(snapshot()); redoStack = [];
+      pushUndo(snapshot());
       noteEditOpen = true;
     }
     const n = { ...noteAt(k), ...change };
@@ -1019,9 +1022,7 @@ const planner = (() => {
     if (drag.mode === 'move') canvas.style.cursor = '';
     if (drag.changed) {
       unifyNotes(); // blocks may have grown, merged or met another block
-      undoStack.push(drag.before);
-      if (undoStack.length > 60) undoStack.shift();
-      redoStack = [];
+      pushUndo(drag.before);
       changed();
     }
     drag = null;
@@ -1042,6 +1043,11 @@ const planner = (() => {
 
   function restore(snap) {
     cells = snap.cells; notes = snap.notes; groups = snap.groups;
+    if (snap.w && snap.h) { // undoing a resize restores the garden size too
+      plan.width = snap.w; plan.height = snap.h;
+      $('#plan-width').value = snap.w; $('#plan-height').value = snap.h;
+    }
+    if (selected && (selected.x >= plan.width || selected.y >= plan.height)) selected = null;
     noteEditOpen = false;
     changed(); draw();
   }
@@ -1105,7 +1111,7 @@ const planner = (() => {
       $('#plan-width').value = plan.width; $('#plan-height').value = plan.height;
       return;
     }
-    undoStack.push(snapshot()); redoStack = [];
+    pushUndo(snapshot());
     for (const k of [...cells.keys()]) {
       if (k % 1024 >= w || Math.floor(k / 1024) >= h) { cells.delete(k); notes.delete(k); groups.delete(k); }
     }
@@ -1139,13 +1145,58 @@ const planner = (() => {
     const year = Math.round(+$('#plan-year').value) || plan.year;
     return {
       name, year, width: plan.width, height: plan.height, notes: $('#plan-notes').value,
-      cells: [...cells].map(([k, c]) => {
-        const n = notes.get(k);
-        const cell = [k % 1024, Math.floor(k / 1024), c];
-        const g = groupOf(k);
-        return n || g ? cell.concat([n ? n.variety.trim() : '', n ? n.rating : 0, n ? n.note : '', g]) : cell;
-      }),
+      cells: packCells(cells, notes, groups), history: packHistory(),
     };
+  }
+
+  // Squares as sent to and from the server: [x, y, crop_id, variety?, rating?, note?, grp?].
+  function packCells(c, n, g) {
+    return [...c].map(([k, crop]) => {
+      const note = n.get(k), grp = g.get(k) || 0;
+      const cell = [k % 1024, Math.floor(k / 1024), crop];
+      return note || grp ? cell.concat([note ? note.variety.trim() : '', note ? note.rating : 0, note ? note.note : '', grp]) : cell;
+    });
+  }
+  function unpackCells(list) {
+    const c = new Map(), n = new Map(), g = new Map();
+    for (const [x, y, crop, variety = '', rating = 0, note = '', grp = 0] of list) {
+      if (!state.cropById.has(crop)) continue; // crop deleted since this was saved
+      const k = KEY(x, y);
+      c.set(k, crop);
+      if (variety || rating || note) n.set(k, { variety, rating, note });
+      if (grp) g.set(k, grp);
+    }
+    return { cells: c, notes: n, groups: g };
+  }
+
+  // Undo/redo history is saved with the plan, so it survives reloads and works on any
+  // device. Snapshots never change once on a stack, so each is packed only once.
+  const packed = new WeakMap(); // snapshot -> {data, size}
+  function packSnap(s) {
+    let p = packed.get(s);
+    if (!p) {
+      const data = { w: s.w, h: s.h, cells: packCells(s.cells, s.notes, s.groups) };
+      p = { data, size: JSON.stringify(data).length };
+      packed.set(s, p);
+    }
+    return p.data;
+  }
+  const unpackSnap = d => ({ ...unpackCells(d.cells || []), w: d.w, h: d.h });
+
+  // Newest steps first, within HISTORY_BYTES; the oldest steps of a huge plan are dropped.
+  function packHistory() {
+    let budget = HISTORY_BYTES;
+    const take = stack => {
+      const out = [];
+      for (let i = stack.length - 1; i >= 0; i--) {
+        const data = packSnap(stack[i]);
+        if ((budget -= packed.get(stack[i]).size) < 0) break;
+        out.unshift(data);
+      }
+      return out;
+    };
+    const undo = take(undoStack), redo = take(redoStack);
+    return { undo, redo };
   }
 
   async function save() {
@@ -1180,9 +1231,11 @@ const planner = (() => {
   addEventListener('beforeunload', e => {
     if (dirty || savePromise) {
       if (dirty && plan) {
+        // keepalive requests are limited to 64 KB; if too big, save the plan without its history
+        let body = JSON.stringify(payload());
+        if (body.length > 60000) body = JSON.stringify({ ...payload(), history: undefined });
         fetch(`/api/plans/${plan.id}`, {
-          method: 'PUT', keepalive: true, headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload()),
+          method: 'PUT', keepalive: true, headers: { 'Content-Type': 'application/json' }, body,
         });
       }
       e.preventDefault();
